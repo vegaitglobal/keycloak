@@ -1,0 +1,31 @@
+name: Docker Image CI
+env:
+  VERSION: 25.0.6
+on:
+  push:
+    branches: ["release/vega/$VERSION"]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Keycloak
+        uses: ./.github/actions/build-keycloak
+        with:
+          upload-m2-repo: false
+          upload-dist: true
+      - name: Copy Docker image
+        working-directory: ./quarkus
+        run: cp ./dist/target/keycloak-$VERSION.tar.gz ./container
+      - name: Build the Docker image
+        working-directory: ./quarkus/container
+        run: docker build --build-arg KEYCLOAK_DIST=keycloak-$VERSION.tar.gz -t jstale/keycloak:$VERSION .
+
+      - name: Login to dockerhub
+        uses: docker/login-action@v3.3.0
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+      - name: Build the Docker image
+        run: docker push jstale/keycloak:$VERSION
