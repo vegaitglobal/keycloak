@@ -240,6 +240,9 @@ public class DefaultTokenManager implements TokenManager {
         switch (category) {
             case LOGOUT:
                 return TokenUtil.TOKEN_TYPE_JWT_LOGOUT_TOKEN;
+
+            case ACCESS:
+                return TokenUtil.TOKEN_TYPE_JWT_ACCESS_TOKEN;
             default:
                 return "JWT";
         }
