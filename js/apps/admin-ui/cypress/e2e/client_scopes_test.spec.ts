@@ -1,4 +1,3 @@
-import { v4 as uuid } from "uuid";
 import LoginPage from "../support/pages/LoginPage";
 import Masthead from "../support/pages/admin-ui/Masthead";
 import ListingPage, {
@@ -35,7 +34,7 @@ const clientDetailsPage = new ClientDetailsPage();
 
 describe("Client Scopes test", () => {
   const modalMessageDeleteConfirmation =
-    "Are you sure you want to delete this client scope";
+    "Are you sure you want to delete this client scope?";
   const notificationMessageDeletionConfirmation =
     "The client scope has been deleted";
   const clientScopeName = "client-scope-test";
@@ -302,7 +301,7 @@ describe("Client Scopes test", () => {
     });
 
     it("Client scope CRUD test", () => {
-      itemId += "_" + uuid();
+      itemId += "_" + crypto.randomUUID();
 
       // Create
       listingPage.itemExist(itemId, false).goToCreateItem();
@@ -430,7 +429,7 @@ describe("Client Scopes test", () => {
       cy.injectAxe();
     });
 
-    const scopeName = "a11y";
+    const scopeName = "a11y_" + crypto.randomUUID();
 
     after(async () => {
       await adminClient.deleteClientScope(scopeName);

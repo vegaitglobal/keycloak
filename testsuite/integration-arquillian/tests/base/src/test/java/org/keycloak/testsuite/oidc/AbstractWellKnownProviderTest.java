@@ -30,6 +30,7 @@ import org.junit.Test;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.common.Profile;
+import org.keycloak.common.constants.ServiceAccountConstants;
 import org.keycloak.crypto.Algorithm;
 import org.keycloak.jose.jwe.JWEConstants;
 import org.keycloak.jose.jwk.JSONWebKeySet;
@@ -54,7 +55,9 @@ import org.keycloak.testsuite.forms.BrowserFlowTest;
 import org.keycloak.testsuite.forms.LevelOfAssuranceFlowTest;
 import org.keycloak.testsuite.util.AdminClientUtil;
 import org.keycloak.testsuite.util.ClientManager;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
+import org.keycloak.testsuite.util.oauth.AuthorizationEndpointResponse;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
 import org.keycloak.testsuite.util.TokenSignatureUtil;
 import org.keycloak.util.JsonSerialization;
 
@@ -113,10 +116,9 @@ public abstract class AbstractWellKnownProviderTest extends AbstractKeycloakTest
 
             // URIs are filled
             assertEquals(oidcConfig.getAuthorizationEndpoint(), OIDCLoginProtocolService.authUrl(UriBuilder.fromUri(OAuthClient.AUTH_SERVER_ROOT)).build("test").toString());
-            assertEquals(oidcConfig.getTokenEndpoint(), oauth.getAccessTokenUrl());
+            assertEquals(oidcConfig.getTokenEndpoint(), oauth.getEndpoints().getToken());
             assertEquals(oidcConfig.getUserinfoEndpoint(), OIDCLoginProtocolService.userInfoUrl(UriBuilder.fromUri(OAuthClient.AUTH_SERVER_ROOT)).build("test").toString());
-            assertEquals(oidcConfig.getJwksUri(), oauth.getCertsUrl("test"));
-
+            assertEquals(oidcConfig.getJwksUri(), oauth.getEndpoints().getJwks());
 
             String registrationUri = UriBuilder
                     .fromUri(OAuthClient.AUTH_SERVER_ROOT)
@@ -188,7 +190,7 @@ public abstract class AbstractWellKnownProviderTest extends AbstractKeycloakTest
             Assert.assertEquals(oidcConfig.getRevocationEndpoint(), mtlsEndpointAliases.getRevocationEndpoint());
 
             // CIBA
-            assertEquals(oidcConfig.getBackchannelAuthenticationEndpoint(), oauth.getBackchannelAuthenticationUrl());
+            assertEquals(oidcConfig.getBackchannelAuthenticationEndpoint(), oauth.getEndpoints().getBackchannelAuthentication());
             assertContains(oidcConfig.getGrantTypesSupported(), OAuth2Constants.CIBA_GRANT_TYPE);
             Assert.assertNames(oidcConfig.getBackchannelTokenDeliveryModesSupported(), "poll", "ping");
             Assert.assertNames(oidcConfig.getBackchannelAuthenticationRequestSigningAlgValuesSupported(), Algorithm.PS256, Algorithm.PS384, Algorithm.PS512, Algorithm.RS256, Algorithm.RS384, Algorithm.RS512, Algorithm.ES256, Algorithm.ES384, Algorithm.ES512, Algorithm.EdDSA);
@@ -197,17 +199,17 @@ public abstract class AbstractWellKnownProviderTest extends AbstractKeycloakTest
             Assert.assertTrue(oidcConfig.getBackchannelLogoutSessionSupported());
 
             // Token Revocation
-            assertEquals(oidcConfig.getRevocationEndpoint(), oauth.getTokenRevocationUrl());
+            assertEquals(oidcConfig.getRevocationEndpoint(), oauth.getEndpoints().getRevocation());
             Assert.assertNames(oidcConfig.getRevocationEndpointAuthMethodsSupported(), "client_secret_basic",
                     "client_secret_post", "private_key_jwt", "client_secret_jwt", "tls_client_auth");
             Assert.assertNames(oidcConfig.getRevocationEndpointAuthSigningAlgValuesSupported(), Algorithm.PS256,
                     Algorithm.PS384, Algorithm.PS512, Algorithm.RS256, Algorithm.RS384, Algorithm.RS512, Algorithm.ES256,
                     Algorithm.ES384, Algorithm.ES512, Algorithm.HS256, Algorithm.HS384, Algorithm.HS512, Algorithm.EdDSA);
 
-            assertEquals(oidcConfig.getDeviceAuthorizationEndpoint(), oauth.getDeviceAuthorizationUrl());
+            assertEquals(oidcConfig.getDeviceAuthorizationEndpoint(), oauth.getEndpoints().getDeviceAuthorization());
 
             // Pushed Authorization Request (PAR)
-            assertEquals(oauth.getParEndpointUrl(), oidcConfig.getPushedAuthorizationRequestEndpoint());
+            assertEquals(oauth.getEndpoints().getPushedAuthorizationRequest(), oidcConfig.getPushedAuthorizationRequestEndpoint());
             assertEquals(Boolean.FALSE, oidcConfig.getRequirePushedAuthorizationRequests());
 
             // frontchannel logout
@@ -241,8 +243,8 @@ public abstract class AbstractWellKnownProviderTest extends AbstractKeycloakTest
 
     @Test
     public void testIssuerMatches() throws Exception {
-        OAuthClient.AuthorizationEndpointResponse authzResp = oauth.doLogin("test-user@localhost", "password");
-        OAuthClient.AccessTokenResponse response = oauth.doAccessTokenRequest(authzResp.getCode(), "password");
+        AuthorizationEndpointResponse authzResp = oauth.doLogin("test-user@localhost", "password");
+        AccessTokenResponse response = oauth.doAccessTokenRequest(authzResp.getCode(), "password");
         assertEquals(200, response.getStatusCode());
         IDToken idToken = oauth.verifyIDToken(response.getIdToken());
 
@@ -386,7 +388,8 @@ public abstract class AbstractWellKnownProviderTest extends AbstractKeycloakTest
     protected void assertScopesSupportedMatchesWithRealm(OIDCConfigurationRepresentation oidcConfig) {
         Assert.assertNames(oidcConfig.getScopesSupported(), OAuth2Constants.SCOPE_OPENID, OAuth2Constants.OFFLINE_ACCESS,
                 OAuth2Constants.SCOPE_PROFILE, OAuth2Constants.SCOPE_EMAIL, OAuth2Constants.SCOPE_PHONE, OAuth2Constants.SCOPE_ADDRESS, OIDCLoginProtocolFactory.ACR_SCOPE, OIDCLoginProtocolFactory.BASIC_SCOPE,
-                OIDCLoginProtocolFactory.ROLES_SCOPE, OIDCLoginProtocolFactory.WEB_ORIGINS_SCOPE, OIDCLoginProtocolFactory.MICROPROFILE_JWT_SCOPE, OAuth2Constants.ORGANIZATION);
+                OIDCLoginProtocolFactory.ROLES_SCOPE, OIDCLoginProtocolFactory.WEB_ORIGINS_SCOPE, OIDCLoginProtocolFactory.MICROPROFILE_JWT_SCOPE, OAuth2Constants.ORGANIZATION,
+                ServiceAccountConstants.SERVICE_ACCOUNT_SCOPE);
     }
 
     protected OIDCConfigurationRepresentation getOIDCDiscoveryRepresentation(Client client, String uriTemplate) {

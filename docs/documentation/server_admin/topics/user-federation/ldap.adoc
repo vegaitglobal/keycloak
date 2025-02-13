@@ -76,6 +76,9 @@ Toggle this switch to *ON* if you want new users created by {project_name} added
 Allow Kerberos authentication::
 Enable Kerberos/SPNEGO authentication in the realm with user data provisioned from LDAP. For more information, see the <<_kerberos,Kerberos section>>.
 
+Remove invalid users during searches::
+Remove users from the local database if they are not available from the user storage when executing searches. If this is true, users no longer available from their corresponding user storage will be deleted from the local database whenever trying to look up users. If false, then users previously imported from the user storage will be kept in the local database, as read-only and disabled, even if that user is no longer available from the user storage. For example, user was deleted directly from LDAP or the `Users DN` is invalid. Note that this behavior will only happen when the user is not yet cached.
+
 Other options::
 Hover the mouse pointer over the tooltips in the Admin Console to see more details about these options.
 
@@ -174,6 +177,8 @@ The LDAP connection pool configuration is configured using the following system 
 | `com.sun.jndi.ldap.connect.pool.protocol` | A list of space-separated protocol types of connections that may be pooled. Valid types are "plain" and "ssl"
 | `com.sun.jndi.ldap.connect.pool.debug` | A string that indicates the level of debug output to produce. Valid values are "fine" (trace connection creation and removal) and "all" (all debugging information)
 |===
+
+By default, connection pooling is enabled for both `plain` and `ssl` protocols.
 
 For more details, see the link:https://docs.oracle.com/javase/jndi/tutorial/ldap/connect/config.html[Java LDAP Connection Pooling Configuration] documentation.
 

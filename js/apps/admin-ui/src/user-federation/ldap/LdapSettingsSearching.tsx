@@ -41,7 +41,7 @@ export const LdapSettingsSearching = ({
           controller={{
             defaultValue: "",
             rules: {
-              required: { value: true, message: t("validateEditMode") },
+              required: t("validateEditMode"),
             },
           }}
           options={["", "READ_ONLY", "WRITABLE", "UNSYNCED"]}
@@ -134,7 +134,7 @@ export const LdapSettingsSearching = ({
         >
           <Controller
             name="config.pagination"
-            defaultValue={["false"]}
+            defaultValue={["true"]}
             control={form.control}
             render={({ field }) => (
               <Switch

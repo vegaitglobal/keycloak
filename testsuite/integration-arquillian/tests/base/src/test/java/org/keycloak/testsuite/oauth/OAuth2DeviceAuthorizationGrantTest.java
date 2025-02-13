@@ -22,6 +22,7 @@ import static org.junit.Assert.assertNull;
 import static org.keycloak.models.OAuth2DeviceConfig.DEFAULT_OAUTH2_DEVICE_CODE_LIFESPAN;
 import static org.keycloak.models.OAuth2DeviceConfig.DEFAULT_OAUTH2_DEVICE_POLLING_INTERVAL;
 
+import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.jboss.arquillian.graphene.page.Page;
 import org.junit.Before;
@@ -56,7 +57,9 @@ import org.keycloak.testsuite.pages.OAuth2DeviceVerificationPage;
 import org.keycloak.testsuite.pages.OAuthGrantPage;
 import org.keycloak.testsuite.util.ClientBuilder;
 import org.keycloak.testsuite.util.ContainerAssume;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
+import org.keycloak.testsuite.util.oauth.DeviceAuthorizationResponse;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
 import org.keycloak.testsuite.util.RealmBuilder;
 import org.keycloak.testsuite.util.UserBuilder;
 
@@ -69,10 +72,9 @@ import org.apache.http.impl.client.CloseableHttpClient;
 import org.keycloak.util.BasicAuthHelper;
 import org.openqa.selenium.Cookie;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.LinkedList;
-
-import java.io.UnsupportedEncodingException;
 
 /**
  * @author <a href="mailto:h2-wada@nri.co.jp">Hiroyuki Wada</a>
@@ -161,7 +163,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         // Device Authorization Request from device
         oauth.realm(REALM_NAME);
         oauth.clientId(DEVICE_APP);
-        OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
+        DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
 
         Assert.assertEquals(200, response.getStatusCode());
         assertNotNull(response.getDeviceCode());
@@ -189,7 +191,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         verificationPage.assertApprovedPage();
 
         // Token request from device
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP, "secret", response.getDeviceCode());
+        AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP, "secret", response.getDeviceCode());
 
         Assert.assertEquals(200, tokenResponse.getStatusCode());
 
@@ -205,7 +207,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         // Device Authorization Request from device
         oauth.realm(REALM_NAME);
         oauth.clientId(DEVICE_APP_PUBLIC);
-        OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP_PUBLIC, null);
+        DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP_PUBLIC, null);
 
         Assert.assertEquals(200, response.getStatusCode());
         assertNotNull(response.getDeviceCode());
@@ -224,7 +226,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         grantPage.accept();
 
         // Token request from device
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP_PUBLIC, null, response.getDeviceCode());
+        AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP_PUBLIC, null, response.getDeviceCode());
 
         Assert.assertEquals(200, tokenResponse.getStatusCode());
 
@@ -246,7 +248,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
             testRealm.update(realmRep);
             oauth.realm(REALM_NAME);
             oauth.clientId(DEVICE_APP_PUBLIC);
-            OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP_PUBLIC, null);
+            DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP_PUBLIC, null);
 
             Assert.assertEquals(200, response.getStatusCode());
             assertNotNull(response.getDeviceCode());
@@ -266,7 +268,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         // Device Authorization Request from device
         oauth.realm(REALM_NAME);
         oauth.clientId(DEVICE_APP_PUBLIC);
-        OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP_PUBLIC, null);
+        DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP_PUBLIC, null);
 
         assertEquals(200, response.getStatusCode());
         assertNotNull(response.getDeviceCode());
@@ -285,7 +287,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         grantPage.accept();
 
         // Token request from device
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP_PUBLIC, null, response.getDeviceCode());
+        AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP_PUBLIC, null, response.getDeviceCode());
 
         assertEquals(200, tokenResponse.getStatusCode());
 
@@ -332,7 +334,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         // Device Authorization Request from device - check giving optional scope phone
         oauth.realm(REALM_NAME);
         oauth.clientId(DEVICE_APP_PUBLIC);
-        OAuthClient.DeviceAuthorizationResponse response = null;
+        DeviceAuthorizationResponse response = null;
         try {
             oauth.scope("phone");
             response = oauth.doDeviceAuthorizationRequest(DEVICE_APP_PUBLIC, null);
@@ -359,7 +361,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         grantPage.accept();
 
         // Token request from device
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP_PUBLIC, null, response.getDeviceCode());
+        AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP_PUBLIC, null, response.getDeviceCode());
 
         Assert.assertEquals(200, tokenResponse.getStatusCode());
 
@@ -386,7 +388,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         oauth.codeChallenge(pkce.getCodeChallenge());
         oauth.codeChallengeMethod(OAuth2Constants.PKCE_METHOD_S256);
         oauth.codeVerifier(pkce.getCodeVerifier());
-        OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP_PUBLIC, null);
+        DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP_PUBLIC, null);
 
         Assert.assertEquals(200, response.getStatusCode());
         assertNotNull(response.getDeviceCode());
@@ -405,7 +407,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         grantPage.accept();
 
         // Token request from device
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP_PUBLIC, null, response.getDeviceCode());
+        AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP_PUBLIC, null, response.getDeviceCode());
 
         Assert.assertEquals(200, tokenResponse.getStatusCode());
 
@@ -425,7 +427,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         oauth.codeChallenge(pkce.getCodeChallenge());
         oauth.codeChallengeMethod(OAuth2Constants.PKCE_METHOD_S256);
         oauth.codeVerifier(pkce.getCodeVerifier()+"a");
-        OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP_PUBLIC, null);
+        DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP_PUBLIC, null);
 
         Assert.assertEquals(200, response.getStatusCode());
         assertNotNull(response.getDeviceCode());
@@ -444,7 +446,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         grantPage.accept();
 
         // Token request from device
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP_PUBLIC, null, response.getDeviceCode());
+        AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP_PUBLIC, null, response.getDeviceCode());
 
         Assert.assertEquals(400, tokenResponse.getStatusCode());
         Assert.assertEquals("invalid_grant", tokenResponse.getError());
@@ -457,7 +459,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         // Device Authorization Request from device
         oauth.realm(REALM_NAME);
         oauth.clientId(DEVICE_APP_PUBLIC_CUSTOM_CONSENT);
-        OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP_PUBLIC_CUSTOM_CONSENT, null);
+        DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP_PUBLIC_CUSTOM_CONSENT, null);
 
         Assert.assertEquals(200, response.getStatusCode());
         assertNotNull(response.getDeviceCode());
@@ -477,7 +479,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         grantPage.accept();
 
         // Token request from device
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP_PUBLIC_CUSTOM_CONSENT, null, response.getDeviceCode());
+        AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP_PUBLIC_CUSTOM_CONSENT, null, response.getDeviceCode());
 
         Assert.assertEquals(200, tokenResponse.getStatusCode());
 
@@ -504,7 +506,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         // Device Authorization Request from device
         oauth.realm(REALM_NAME);
         oauth.clientId(DEVICE_APP_WITHOUT_SCOPES);
-        OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP_WITHOUT_SCOPES, null);
+        DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP_WITHOUT_SCOPES, null);
 
         Assert.assertEquals(200, response.getStatusCode());
         assertNotNull(response.getVerificationUriComplete());
@@ -526,7 +528,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         // Device Authorization Request from device
         oauth.realm(REALM_NAME);
         oauth.clientId(DEVICE_APP);
-        OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
+        DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
 
         // Verify user code from verification page using browser
         openVerificationPage(response.getVerificationUri());
@@ -539,7 +541,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         grantPage.accept();
 
         // Token request from device
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP, "secret",
+        AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP, "secret",
             response.getDeviceCode());
 
         Assert.assertEquals(200, tokenResponse.getStatusCode());
@@ -556,7 +558,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         // Device Authorization Request from device
         oauth.realm(REALM_NAME);
         oauth.clientId(DEVICE_APP);
-        OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
+        DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
 
         Assert.assertEquals(200, response.getStatusCode());
         assertNotNull(response.getDeviceCode());
@@ -579,7 +581,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
 
         verificationPage.assertDeniedPage();
  
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP, "secret", response.getDeviceCode());
+        AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP, "secret", response.getDeviceCode());
 
         Assert.assertEquals(400, tokenResponse.getStatusCode());
         Assert.assertEquals("access_denied", tokenResponse.getError());
@@ -590,7 +592,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         // Device Authorization Request from device
         oauth.realm(REALM_NAME);
         oauth.clientId(DEVICE_APP);
-        OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
+        DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
 
         Assert.assertEquals(200, response.getStatusCode());
         assertNotNull(response.getDeviceCode());
@@ -612,7 +614,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         // Device Authorization Request from device
         oauth.realm(REALM_NAME);
         oauth.clientId(DEVICE_APP);
-        OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
+        DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
 
         Assert.assertEquals(200, response.getStatusCode());
         assertNotNull(response.getDeviceCode());
@@ -639,7 +641,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         // Device Authorization Request from device
         oauth.realm(REALM_NAME);
         oauth.clientId(DEVICE_APP);
-        OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
+        DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
 
         Assert.assertEquals(200, response.getStatusCode());
         assertNotNull(response.getDeviceCode());
@@ -661,7 +663,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         grantPage.accept();
 
         // Token request from device
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP, "secret", "x");
+        AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP, "secret", "x");
 
         Assert.assertEquals(400, tokenResponse.getStatusCode());
         Assert.assertEquals("invalid_grant", tokenResponse.getError());
@@ -672,7 +674,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         // Device Authorization Request from device
         oauth.realm(REALM_NAME);
         oauth.clientId(DEVICE_APP);
-        OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
+        DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
 
         Assert.assertEquals(200, response.getStatusCode());
         assertNotNull(response.getDeviceCode());
@@ -696,7 +698,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         verificationPage.assertApprovedPage();
 
         // Token request from device
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP, "secret", response.getDeviceCode());
+        AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP, "secret", response.getDeviceCode());
 
         Assert.assertEquals(200, tokenResponse.getStatusCode());
     }
@@ -707,7 +709,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         // Device Authorization Request from device
         oauth.realm(REALM_NAME);
         oauth.clientId(DEVICE_APP);
-        OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
+        DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
 
         Assert.assertEquals(200, response.getStatusCode());
         assertNotNull(response.getDeviceCode());
@@ -720,7 +722,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         try {
             setTimeOffset(610);
             // Token request from device
-            OAuthClient.AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP, "secret",
+            AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP, "secret",
                 response.getDeviceCode());
 
             Assert.assertEquals(400, tokenResponse.getStatusCode());
@@ -735,7 +737,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
     public void testDuplicatedRequestParams() throws Exception {
         oauth.realm(REALM_NAME);
         oauth.clientId(DEVICE_APP_PUBLIC);
-        OAuthClient.DeviceAuthorizationResponse response = doDeviceAuthorizationWithDuplicatedParams(DEVICE_APP_PUBLIC, null);
+        DeviceAuthorizationResponse response = doDeviceAuthorizationWithDuplicatedParams(DEVICE_APP_PUBLIC, null);
         
         Assert.assertEquals(400, response.getStatusCode());
         Assert.assertEquals("invalid_grant", response.getError());
@@ -750,7 +752,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         // Device Authorization Request from device
         oauth.realm(REALM_NAME);
         oauth.clientId(DEVICE_APP);
-        OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
+        DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
 
         Assert.assertEquals(200, response.getStatusCode());
         assertNotNull(response.getDeviceCode());
@@ -766,7 +768,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
 
         response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
         Assert.assertEquals(120, response.getExpiresIn());
-        OAuthClient.AccessTokenResponse tokenResponse;
+        AccessTokenResponse tokenResponse;
 
         try {
             setTimeOffset(100);
@@ -800,7 +802,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         // Device Authorization Request from device
         oauth.realm(REALM_NAME);
         oauth.clientId(DEVICE_APP);
-        OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
+        DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
 
         Assert.assertEquals(200, response.getStatusCode());
         assertNotNull(response.getDeviceCode());
@@ -818,7 +820,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
 
         try {
             // Token request from device
-            OAuthClient.AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP, "secret",
+            AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP, "secret",
                 response.getDeviceCode());
 
             Assert.assertEquals(400, tokenResponse.getStatusCode());
@@ -863,13 +865,13 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
             // Device Authorization Request from device
             oauth.realm(REALM_NAME);
             oauth.clientId(DEVICE_APP);
-            OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
+            DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
 
             Assert.assertEquals(600, response.getExpiresIn());
             Assert.assertEquals(5, response.getInterval());
 
             // Polling token request from device
-            OAuthClient.AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP, "secret", response.getDeviceCode());
+            AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP, "secret", response.getDeviceCode());
 
             // Not approved yet
             Assert.assertEquals(400, tokenResponse.getStatusCode());
@@ -963,7 +965,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         // Device Authorization Request from device
         oauth.realm(REALM_NAME);
         oauth.clientId(DEVICE_APP);
-        OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
+        DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
 
         Assert.assertEquals(200, response.getStatusCode());
         assertNotNull(response.getDeviceCode());
@@ -991,10 +993,51 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
     }
 
     @Test
+    public void testConsentCancelCannotBeReusedAfterBackClicked() throws Exception {
+        // Device Authorization Request from device
+        oauth.realm(REALM_NAME);
+        oauth.clientId(DEVICE_APP);
+        DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP, "secret");
+
+        Assert.assertEquals(200, response.getStatusCode());
+        assertNotNull(response.getDeviceCode());
+        assertNotNull(response.getUserCode());
+        assertNotNull(response.getVerificationUri());
+        assertNotNull(response.getVerificationUriComplete());
+        Assert.assertEquals(60, response.getExpiresIn());
+        Assert.assertEquals(5, response.getInterval());
+
+        openVerificationPage(response.getVerificationUriComplete());
+        loginPage.assertCurrent();
+
+        // Do Login
+        oauth.fillLoginForm("device-login", "password");
+
+        // Consent
+        grantPage.assertCurrent();
+        grantPage.cancel();
+
+        //click back after cancel
+        grantPage.getDriver().navigate().back();
+
+        // Accept consent
+        grantPage.assertCurrent();
+        grantPage.assertGrants(OAuthGrantPage.PROFILE_CONSENT_TEXT, OAuthGrantPage.EMAIL_CONSENT_TEXT, OAuthGrantPage.ROLES_CONSENT_TEXT);
+        grantPage.accept();
+
+        verificationPage.assertDeniedPage();
+
+        AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP, "secret", response.getDeviceCode());
+
+        Assert.assertEquals(400, tokenResponse.getStatusCode());
+        Assert.assertEquals("access_denied", tokenResponse.getError());
+    }
+
+    @Test
     public void testNotFoundClient() throws Exception {
         oauth.realm(REALM_NAME);
         oauth.clientId("test-device-public2");
-        OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest("test-device-public2", null);
+        DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest("test-device-public2", null);
 
         Assert.assertEquals(401, response.getStatusCode());
         Assert.assertEquals(Errors.INVALID_CLIENT, response.getError());
@@ -1011,7 +1054,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
             oauth.clientId(DEVICE_APP_PUBLIC);
 
             //DeviceAuthorizationGrant not enabled
-            OAuthClient.DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP_PUBLIC, null);
+            DeviceAuthorizationResponse response = oauth.doDeviceAuthorizationRequest(DEVICE_APP_PUBLIC, null);
             Assert.assertEquals(400, response.getStatusCode());
             Assert.assertEquals(Errors.UNAUTHORIZED_CLIENT, response.getError());
             Assert.assertEquals("Client is not allowed to initiate OAuth 2.0 Device Authorization Grant. The flow is disabled for the client.", response.getErrorDescription());
@@ -1038,7 +1081,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
     @Test
     public void ensureDeviceFlowConfigPresentWhenDeviceFlowIsEnabled() {
 
-        OIDCConfigurationRepresentation oidcConfigRep = oauth.doWellKnownRequest(REALM_NAME);
+        OIDCConfigurationRepresentation oidcConfigRep = oauth.doWellKnownRequest();
         Assert.assertNotNull("deviceAuthorizationEndpoint should be not null", oidcConfigRep.getDeviceAuthorizationEndpoint());
         Assert.assertNotNull("mtlsEndpointAliases.deviceAuthorizationEndpoint should be not null", oidcConfigRep.getMtlsEndpointAliases().getDeviceAuthorizationEndpoint());
     }
@@ -1053,19 +1096,17 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         testingClient.disableFeature(Profile.Feature.DEVICE_FLOW);
 
         try {
-            OIDCConfigurationRepresentation oidcConfigRep = oauth.doWellKnownRequest(REALM_NAME);
+            OIDCConfigurationRepresentation oidcConfigRep = oauth.doWellKnownRequest();
             Assert.assertNull("deviceAuthorizationEndpoint should be null", oidcConfigRep.getDeviceAuthorizationEndpoint());
             Assert.assertNull("mtlsEndpointAliases.deviceAuthorizationEndpoint should be null", oidcConfigRep.getMtlsEndpointAliases().getDeviceAuthorizationEndpoint());
 
-            try (var httpClient = oauth.getHttpClient().get()) {
-                Assert.assertEquals("Should return not found for device auth endpoint"
-                        , (long) 404
-                        , (long) httpClient.execute(new HttpGet(oauth.getDeviceAuthorizationUrl()), r -> r.getStatusLine().getStatusCode()));
+            try (CloseableHttpResponse response = oauth.httpClient().get().execute(new HttpGet(oauth.getEndpoints().getDeviceAuthorization()))) {
+                Assert.assertEquals("Should return not found for device auth endpoint", 404, response.getStatusLine().getStatusCode());
             }
 
             oauth.realm(REALM_NAME);
             oauth.clientId(DEVICE_APP_PUBLIC);
-            OAuthClient.AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP_PUBLIC, null, "dummy");
+            AccessTokenResponse tokenResponse = oauth.doDeviceTokenRequest(DEVICE_APP_PUBLIC, null, "dummy");
             Assert.assertEquals(OAuthErrorException.UNSUPPORTED_GRANT_TYPE, tokenResponse.getError());
         } finally {
             testingClient.resetFeature(Profile.Feature.DEVICE_FLOW);
@@ -1076,9 +1117,9 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
         driver.navigate().to(verificationUri);
     }
 
-    private OAuthClient.DeviceAuthorizationResponse doDeviceAuthorizationWithDuplicatedParams(String clientId, String clientSecret) throws Exception {
+    private DeviceAuthorizationResponse doDeviceAuthorizationWithDuplicatedParams(String clientId, String clientSecret) throws Exception {
         try (CloseableHttpClient client = HttpClientBuilder.create().build()) {
-            HttpPost post = new HttpPost(oauth.getDeviceAuthorizationUrl());
+            HttpPost post = new HttpPost(oauth.getEndpoints().getDeviceAuthorization());
 
             List<NameValuePair> parameters = new LinkedList<>();
             if (clientSecret != null) {
@@ -1091,15 +1132,10 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
             parameters.add(new BasicNameValuePair(OAuth2Constants.SCOPE, "profile"));
             parameters.add(new BasicNameValuePair(OAuth2Constants.SCOPE, "foo"));
 
-            UrlEncodedFormEntity formEntity;
-            try {
-                formEntity = new UrlEncodedFormEntity(parameters, "UTF-8");
-            } catch (UnsupportedEncodingException e) {
-                throw new RuntimeException(e);
-            }
+            UrlEncodedFormEntity formEntity = new UrlEncodedFormEntity(parameters, StandardCharsets.UTF_8);
             post.setEntity(formEntity);
 
-            return new OAuthClient.DeviceAuthorizationResponse(client.execute(post));
+            return new DeviceAuthorizationResponse(client.execute(post));
         }
     }
 }

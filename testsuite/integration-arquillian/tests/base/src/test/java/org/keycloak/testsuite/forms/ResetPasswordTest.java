@@ -22,8 +22,10 @@ import org.jboss.arquillian.drone.api.annotation.Drone;
 import org.keycloak.admin.client.resource.ClientResource;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.authentication.actiontoken.resetcred.ResetCredentialsActionToken;
+import org.keycloak.authentication.authenticators.resetcred.ResetCredentialEmail;
 import org.jboss.arquillian.graphene.page.Page;
 import org.keycloak.common.constants.ServiceAccountConstants;
+import org.keycloak.common.util.MultivaluedHashMap;
 import org.keycloak.common.util.KeycloakUriBuilder;
 import org.keycloak.events.Details;
 import org.keycloak.events.Errors;
@@ -31,16 +33,24 @@ import org.keycloak.events.EventType;
 import org.keycloak.models.AuthenticationExecutionModel;
 import org.keycloak.models.Constants;
 import org.keycloak.models.credential.PasswordCredentialModel;
+import org.keycloak.models.utils.DefaultAuthenticationFlows;
 import org.keycloak.models.utils.SystemClientUtil;
+import org.keycloak.representations.idm.AuthenticationExecutionInfoRepresentation;
+import org.keycloak.representations.idm.AuthenticatorConfigRepresentation;
 import org.keycloak.representations.idm.ClientRepresentation;
+import org.keycloak.representations.idm.ComponentRepresentation;
 import org.keycloak.representations.idm.EventRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.services.resources.LoginActionsService;
+import org.keycloak.storage.StorageId;
+import org.keycloak.storage.UserStorageProvider;
+import org.keycloak.storage.UserStorageProviderModel;
 import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.testsuite.AbstractTestRealmKeycloakTest;
 import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.arquillian.annotation.IgnoreBrowserDriver;
+import org.keycloak.testsuite.federation.UserMapStorageFactory;
 import org.keycloak.testsuite.federation.kerberos.AbstractKerberosTest;
 import org.keycloak.testsuite.pages.AppPage;
 import org.keycloak.testsuite.pages.AppPage.RequestType;
@@ -57,7 +67,7 @@ import org.keycloak.testsuite.util.GreenMailRule;
 import org.keycloak.testsuite.util.InfinispanTestTimeServiceRule;
 import org.keycloak.testsuite.util.KerberosUtils;
 import org.keycloak.testsuite.util.MailUtils;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
 import org.keycloak.testsuite.util.RealmBuilder;
 import org.keycloak.testsuite.util.SecondBrowser;
 import org.keycloak.testsuite.util.UserActionTokenBuilder;
@@ -333,6 +343,44 @@ public class ResetPasswordTest extends AbstractTestRealmKeycloakTest {
     }
 
     @Test
+    public void resetPasswordForceLogin() throws IOException, MessagingException {
+        // add the force login option in the reset-credential-email authenticator
+        configureForceLogin(Boolean.TRUE.toString());
+
+        resetPassword("login-test", "resetPassword", true);
+    }
+
+    @Test
+    public void resetPasswordForceLoginFederatedUser() throws IOException, MessagingException {
+        // create the example map storage user federation
+        ComponentRepresentation memProvider = new ComponentRepresentation();
+        memProvider.setName(UserStorageProvider.class.getName());
+        memProvider.setProviderId(UserMapStorageFactory.PROVIDER_ID);
+        memProvider.setProviderType(UserStorageProvider.class.getName());
+        memProvider.setConfig(new MultivaluedHashMap<>());
+        memProvider.getConfig().putSingle("priority", Integer.toString(0));
+        memProvider.getConfig().putSingle(UserStorageProviderModel.IMPORT_ENABLED, Boolean.toString(false));
+        String componentId = ApiUtil.getCreatedId(testRealm().components().add(memProvider));
+        getCleanup().addComponentId(componentId);
+
+        // remove the test user and create it but federated
+        testRealm().users().get(userId).remove();
+        UserRepresentation user = new UserRepresentation();
+        user.setUsername("login-test");
+        user.setEmail("login@test.com");
+        user.setFederationLink(componentId);
+        this.userId = ApiUtil.getCreatedId(testRealm().users().create(user));
+        Assert.assertFalse(StorageId.isLocalStorage(userId));
+
+        // by default federated users are force to re-login
+        resetPassword("login-test", "resetPassword", true);
+
+        // check with false the session is maintained
+        configureForceLogin(Boolean.FALSE.toString());
+        resetPassword("login-test", "resetPassword", false);
+    }
+
+    @Test
     public void resetPasswordTwiceInNewBrowser() throws IOException, MessagingException {
         String changePasswordUrl = resetPassword("login-test");
         events.clear();
@@ -376,7 +424,7 @@ public class ResetPasswordTest extends AbstractTestRealmKeycloakTest {
         EventRepresentation loginEvent = events.expectLogin().user(userId).detail(Details.USERNAME, "login@test.com").assertEvent();
 
         String code = oauth.getCurrentQuery().get("code");
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doAccessTokenRequest(code, "password");
+        AccessTokenResponse tokenResponse = oauth.doAccessTokenRequest(code, "password");
 
         assertEquals(200, tokenResponse.getStatusCode());
         assertEquals(userId, oauth.verifyToken(tokenResponse.getAccessToken()).getSubject());
@@ -399,11 +447,29 @@ public class ResetPasswordTest extends AbstractTestRealmKeycloakTest {
         loginPage.assertCurrent();
     }
 
+    private void configureForceLogin(String value) {
+        AuthenticationExecutionInfoRepresentation sendEmailExec = testRealm()
+                .flows()
+                .getExecutions(DefaultAuthenticationFlows.RESET_CREDENTIALS_FLOW)
+                .stream()
+                .filter(e -> ResetCredentialEmail.PROVIDER_ID.equals(e.getProviderId()))
+                .findAny().orElseThrow();
+        AuthenticatorConfigRepresentation config = new AuthenticatorConfigRepresentation();
+        config.setAlias("reset-password-config");
+        config.getConfig().put(ResetCredentialEmail.FORCE_LOGIN, value);
+        String configId = ApiUtil.getCreatedId(testRealm().flows().newExecutionConfig(sendEmailExec.getId(), config));
+        getCleanup().addAuthenticationConfigId(configId);
+    }
+
     private String resetPassword(String username) throws IOException, MessagingException {
-        return resetPassword(username, "resetPassword");
+        return resetPassword(username, "resetPassword", false);
     }
 
     private String resetPassword(String username, String password) throws IOException, MessagingException {
+        return resetPassword(username, password, false);
+    }
+
+    private String resetPassword(String username, String password, boolean relogin) throws IOException, MessagingException {
         initiateResetPasswordFromResetPasswordPage(username);
 
         events.expectRequiredAction(EventType.SEND_RESET_PASSWORD)
@@ -430,29 +496,40 @@ public class ResetPasswordTest extends AbstractTestRealmKeycloakTest {
         events.expectRequiredAction(EventType.UPDATE_PASSWORD).detail(Details.CREDENTIAL_TYPE, PasswordCredentialModel.TYPE).user(userId).detail(Details.USERNAME, username.trim()).assertEvent();
         events.expectRequiredAction(EventType.UPDATE_CREDENTIAL).detail(Details.CREDENTIAL_TYPE, PasswordCredentialModel.TYPE).user(userId).detail(Details.USERNAME, username.trim()).assertEvent();
 
-        assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        if (relogin) {
+            // relogin is forced therefore the info page should be displayed
+            Assert.assertEquals("Your account has been updated.", infoPage.getInfo());
+            String backToAppLink = infoPage.getBackToApplicationLink();
+            ClientRepresentation client = ApiUtil.findClientByClientId(adminClient.realm("test"), "test-app").toRepresentation();
+            Assert.assertEquals(backToAppLink, client.getBaseUrl());
+            loginPage.open();
+            loginPage.assertCurrent();
+        } else {
+            // continue to app because it is the same browser and auth session exists
+            assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
 
-        EventRepresentation loginEvent = events.expectLogin().user(userId).detail(Details.USERNAME, username.trim()).assertEvent();
-        String sessionId = loginEvent.getSessionId();
+            EventRepresentation loginEvent = events.expectLogin().user(userId).detail(Details.USERNAME, username.trim()).assertEvent();
+            String sessionId = loginEvent.getSessionId();
 
-        OAuthClient.AccessTokenResponse tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
-        oauth.idTokenHint(tokenResponse.getIdToken()).openLogout();
+            AccessTokenResponse tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
+            oauth.idTokenHint(tokenResponse.getIdToken()).openLogout();
 
-        events.expectLogout(sessionId).user(userId).session(sessionId).assertEvent();
+            events.expectLogout(sessionId).user(userId).session(sessionId).assertEvent();
 
-        loginPage.open();
+            loginPage.open();
 
-        loginPage.login("login-test", password);
+            loginPage.login("login-test", password);
 
-        loginEvent = events.expectLogin().user(userId).detail(Details.USERNAME, "login-test").assertEvent();
-        sessionId = loginEvent.getSessionId();
+            loginEvent = events.expectLogin().user(userId).detail(Details.USERNAME, "login-test").assertEvent();
+            sessionId = loginEvent.getSessionId();
 
-        assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+            assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
 
-        tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
-        oauth.idTokenHint(tokenResponse.getIdToken()).openLogout();
+            tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
+            oauth.idTokenHint(tokenResponse.getIdToken()).openLogout();
 
-        events.expectLogout(sessionId).user(userId).session(sessionId).assertEvent();
+            events.expectLogout(sessionId).user(userId).session(sessionId).assertEvent();
+        }
 
         return changePasswordUrl;
     }
@@ -1069,7 +1146,7 @@ public class ResetPasswordTest extends AbstractTestRealmKeycloakTest {
         EventRepresentation loginEvent = events.expectLogin().user(userId).detail(Details.USERNAME, "login-test").assertEvent();
         String sessionId = loginEvent.getSessionId();
 
-        OAuthClient.AccessTokenResponse tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
+        AccessTokenResponse tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
         oauth.idTokenHint(tokenResponse.getIdToken()).openLogout();
 
         events.expectLogout(sessionId).user(userId).session(sessionId).assertEvent();
@@ -1288,7 +1365,7 @@ public class ResetPasswordTest extends AbstractTestRealmKeycloakTest {
             resetPasswordInNewTab(defaultUser, CLIENT_ID, REDIRECT_URI);
             assertThat(driver.getCurrentUrl(), Matchers.containsString(REDIRECT_URI));
 
-            String logoutUrl = oauth.getLogoutUrl().build();
+            String logoutUrl = oauth.getEndpoints().getLogoutBuilder().build();
             driver.navigate().to(logoutUrl);
             logoutConfirmPage.assertCurrent();
             logoutConfirmPage.confirmLogout();

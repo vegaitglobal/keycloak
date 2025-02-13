@@ -41,7 +41,7 @@ import org.keycloak.testsuite.pages.PasswordPage;
 import org.keycloak.testsuite.pages.SelectAuthenticatorPage;
 import org.keycloak.testsuite.pages.SetupRecoveryAuthnCodesPage;
 import org.keycloak.testsuite.util.FlowUtil;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
 import org.keycloak.testsuite.util.SecondBrowser;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.chrome.ChromeDriver;
@@ -156,8 +156,11 @@ public class RecoveryAuthnCodesAuthenticatorTest extends AbstractTestRealmKeyclo
                     .assertEvent();
         }
 
-        EventRepresentation event2 = events.expectRequiredAction(EventType.CUSTOM_REQUIRED_ACTION)
-                .user(event1.getUserId()).detail(Details.USERNAME, "test-user@localhost").assertEvent();
+        EventRepresentation event2 = events.expectRequiredAction(EventType.UPDATE_CREDENTIAL)
+                .user(event1.getUserId())
+                .detail(Details.USERNAME, "test-user@localhost")
+                .detail(Details.CREDENTIAL_TYPE, RecoveryAuthnCodesCredentialModel.TYPE)
+                .assertEvent();
         event2 = events.expectLogin().user(event2.getUserId()).session(event2.getDetails().get(Details.CODE_ID))
                 .detail(Details.USERNAME, "test-user@localhost").assertEvent();
 

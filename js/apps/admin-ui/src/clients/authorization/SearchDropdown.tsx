@@ -1,4 +1,5 @@
-import type PolicyProviderRepresentation from "@keycloak/keycloak-admin-client/lib/defs/policyProviderRepresentation";
+import PolicyRepresentation from "@keycloak/keycloak-admin-client/lib/defs/policyRepresentation";
+import UserRepresentation from "@keycloak/keycloak-admin-client/lib/defs/userRepresentation";
 import { SelectControl, TextControl } from "@keycloak/keycloak-ui-shared";
 import {
   ActionGroup,
@@ -7,8 +8,8 @@ import {
   Form,
   MenuToggle,
 } from "@patternfly/react-core";
-import { useEffect } from "react";
-import { FormProvider, useForm } from "react-hook-form";
+import { useEffect, useState } from "react";
+import { FormProvider, useForm, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import useToggle from "../../utils/useToggle";
 
@@ -21,23 +22,33 @@ export type SearchForm = {
   type?: string;
   uri?: string;
   owner?: string;
+  resourceType?: string;
+  policyId?: string;
 };
 
 type SearchDropdownProps = {
-  types?: PolicyProviderRepresentation[] | PolicyProviderRepresentation[];
+  policies?: PolicyRepresentation[];
+  resources?: UserRepresentation[];
+  types?: PolicyRepresentation[];
   search: SearchForm;
   onSearch: (form: SearchForm) => void;
-  type: "resource" | "policy" | "permission";
+  type: "resource" | "policy" | "permission" | "adminPermission";
 };
 
 export const SearchDropdown = ({
+  policies,
+  resources,
   types,
   search,
   onSearch,
   type,
 }: SearchDropdownProps) => {
   const { t } = useTranslation();
-  const form = useForm<SearchForm>({ mode: "onChange" });
+  const form = useForm<SearchForm>({
+    mode: "onChange",
+    defaultValues: search,
+  });
+
   const {
     reset,
     formState: { isDirty },
@@ -45,13 +56,31 @@ export const SearchDropdown = ({
   } = form;
 
   const [open, toggle] = useToggle();
+  const [resourceScopes, setResourceScopes] = useState<string[]>([]);
+  const [localPolicies, setLocalPolicies] = useState<PolicyRepresentation[]>(
+    policies || [],
+  );
+  const selectedType = useWatch({ control: form.control, name: "type" });
+  const [key, setKey] = useState(0);
 
   const submit = (form: SearchForm) => {
     toggle();
     onSearch(form);
   };
 
-  useEffect(() => reset(search), [search]);
+  useEffect(() => {
+    const type = types?.find((item) => item.type === selectedType);
+    setResourceScopes(type?.scopes || []);
+
+    if (policies?.length) {
+      setLocalPolicies(policies);
+    }
+  }, [selectedType, types, policies]);
+
+  useEffect(() => {
+    reset(search);
+    setKey((prevKey) => prevKey + 1);
+  }, [search]);
 
   return (
     <Dropdown
@@ -65,13 +94,15 @@ export const SearchDropdown = ({
         >
           {type === "resource" && t("searchClientAuthorizationResource")}
           {type === "policy" && t("searchClientAuthorizationPolicy")}
-          {type === "permission" && t("searchClientAuthorizationPermission")}
+          {(type === "permission" || type === "adminPermission") &&
+            t("searchClientAuthorizationPermission")}
         </MenuToggle>
       )}
       isOpen={open}
     >
       <FormProvider {...form}>
         <Form
+          key={key}
           isHorizontal
           className="keycloak__client_authentication__searchdropdown_form"
           onSubmit={handleSubmit(submit)}
@@ -84,24 +115,77 @@ export const SearchDropdown = ({
               <TextControl name="owner" label={t("owner")} />
             </>
           )}
-          {type !== "resource" && type !== "policy" && (
-            <TextControl name="resource" label={t("resource")} />
+          {type !== "resource" &&
+            type !== "policy" &&
+            type !== "adminPermission" && (
+              <TextControl name="resource" label={t("resource")} />
+            )}
+          {type !== "policy" && type !== "adminPermission" && (
+            <TextControl name="scope" label={t("scope")} />
           )}
-          {type !== "policy" && <TextControl name="scope" label={t("scope")} />}
           {type !== "resource" && (
             <SelectControl
-              name="type"
-              label={t("type")}
+              name={type !== "adminPermission" ? "type" : "type"}
+              label={type !== "adminPermission" ? t("type") : t("resourceType")}
               controller={{
                 defaultValue: "",
               }}
               options={[
-                { key: "", value: t("allTypes") },
-                ...(types || []).map(({ type, name }) => ({
-                  key: type!,
-                  value: name!,
+                ...(type !== "adminPermission"
+                  ? [{ key: "", value: t("allTypes") }]
+                  : []),
+                ...(Array.isArray(types)
+                  ? types.map(({ type, name }) => ({
+                      key: type!,
+                      value: name! || type!,
+                    }))
+                  : []),
+              ]}
+            />
+          )}
+          {type === "adminPermission" && (
+            <SelectControl
+              name={"resource"}
+              label={t("resource")}
+              controller={{
+                defaultValue: "",
+              }}
+              options={[
+                ...(resources || []).map(({ id, username }) => ({
+                  key: id!,
+                  value: username!,
                 })),
               ]}
+            />
+          )}
+          {type === "adminPermission" && (
+            <SelectControl
+              name={"scope"}
+              label={t("authorizationScope")}
+              controller={{
+                defaultValue: "",
+              }}
+              options={[
+                ...(resourceScopes || []).map((resourceScope) => ({
+                  key: resourceScope!,
+                  value: resourceScope!,
+                })),
+              ]}
+            />
+          )}
+          {type === "adminPermission" && (
+            <SelectControl
+              name={"policyId"}
+              label={t("policy")}
+              controller={{ defaultValue: search.policyId || "" }}
+              options={
+                localPolicies
+                  ? localPolicies.map(({ id, name }) => ({
+                      key: id!,
+                      value: name!,
+                    }))
+                  : []
+              }
             />
           )}
           <ActionGroup>
@@ -116,7 +200,10 @@ export const SearchDropdown = ({
             <Button
               variant="link"
               data-testid="revert-btn"
-              onClick={() => onSearch({})}
+              onClick={() => {
+                reset({});
+                onSearch({});
+              }}
             >
               {t("clear")}
             </Button>

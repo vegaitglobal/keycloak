@@ -34,6 +34,7 @@ import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder;
 import io.fabric8.kubernetes.client.utils.Serialization;
 import io.javaoperatorsdk.operator.api.reconciler.Context;
+import io.javaoperatorsdk.operator.api.reconciler.dependent.managed.DefaultManagedDependentResourceContext;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
 
@@ -55,7 +56,7 @@ import org.keycloak.operator.crds.v2alpha1.deployment.spec.HttpSpecBuilder;
 import org.keycloak.operator.crds.v2alpha1.deployment.spec.UnsupportedSpec;
 import org.mockito.Mockito;
 
-import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -107,7 +108,10 @@ public class PodTemplateTest {
 
         kc.setSpec(keycloakSpecBuilder.build());
 
+        var managedDependentResourceContext = new DefaultManagedDependentResourceContext();
+        //noinspection unchecked
         Context<Keycloak> context = Mockito.mock(Context.class);
+        Mockito.when(context.managedDependentResourceContext()).thenReturn(managedDependentResourceContext);
         Mockito.when(context.getSecondaryResource(StatefulSet.class)).thenReturn(Optional.ofNullable(existingDeployment));
 
         return deployment.desired(kc, context);
@@ -218,8 +222,8 @@ public class PodTemplateTest {
         // Assert
         assertEquals(1, podTemplate.getSpec().getContainers().get(0).getCommand().size());
         assertEquals(command, podTemplate.getSpec().getContainers().get(0).getCommand().get(0));
-        assertEquals(2, podTemplate.getSpec().getContainers().get(0).getArgs().size());
-        assertEquals(arg, podTemplate.getSpec().getContainers().get(0).getArgs().get(1));
+        assertEquals(3, podTemplate.getSpec().getContainers().get(0).getArgs().size());
+        assertEquals(arg, podTemplate.getSpec().getContainers().get(0).getArgs().get(2));
     }
 
     @Test
@@ -402,11 +406,13 @@ public class PodTemplateTest {
         // Assert
         assertNotNull(container);
         assertThat(container.getArgs()).doesNotContain(KeycloakDeploymentDependentResource.OPTIMIZED_ARG);
+        assertThat(container.getArgs()).contains("-Djgroups.bind.address=$(POD_IP)");
 
         var envVars = container.getEnv();
         assertThat(envVars.stream()).anyMatch(envVar -> envVar.getName().equals(KeycloakDeploymentDependentResource.KC_TRUSTSTORE_PATHS));
         assertThat(envVars.stream()).anyMatch(envVar -> envVar.getName().equals(KeycloakDeploymentDependentResource.KC_TRACING_SERVICE_NAME));
         assertThat(envVars.stream()).anyMatch(envVar -> envVar.getName().equals(KeycloakDeploymentDependentResource.KC_TRACING_RESOURCE_ATTRIBUTES));
+        assertThat(envVars.stream()).anyMatch(envVar -> envVar.getName().equals(KeycloakDeploymentDependentResource.POD_IP));
 
         var readiness = container.getReadinessProbe().getHttpGet();
         assertNotNull(readiness);
@@ -569,14 +575,14 @@ public class PodTemplateTest {
                 .getSpec().getTemplate();
 
         // Assert
-        assertThat(podTemplate.getSpec().getTolerations()).isEqualTo(Arrays.asList(toleration));
+        assertThat(podTemplate.getSpec().getTolerations()).isEqualTo(List.of(toleration));
 
         podTemplate = getDeployment(new PodTemplateSpecBuilder().withNewSpec().withTolerations(new Toleration()).endSpec().build(), null,
                 s -> s.withNewSchedulingSpec().addToTolerations(toleration).endSchedulingSpec())
                 .getSpec().getTemplate();
 
         // Assert
-        assertThat(podTemplate.getSpec().getTolerations()).isNotEqualTo(Arrays.asList(toleration));
+        assertThat(podTemplate.getSpec().getTolerations()).isNotEqualTo(List.of(toleration));
 
     }
 
@@ -593,14 +599,14 @@ public class PodTemplateTest {
                 .getSpec().getTemplate();
 
         // Assert
-        assertThat(podTemplate.getSpec().getTopologySpreadConstraints()).isEqualTo(Arrays.asList(tsc));
+        assertThat(podTemplate.getSpec().getTopologySpreadConstraints()).isEqualTo(List.of(tsc));
 
         podTemplate = getDeployment(new PodTemplateSpecBuilder().withNewSpec().withTopologySpreadConstraints(new TopologySpreadConstraint()).endSpec().build(), null,
                 s -> s.withNewSchedulingSpec().addToTopologySpreadConstraints(tsc).endSchedulingSpec())
                 .getSpec().getTemplate();
 
         // Assert
-        assertThat(podTemplate.getSpec().getTopologySpreadConstraints()).isNotEqualTo(Arrays.asList(tsc));
+        assertThat(podTemplate.getSpec().getTopologySpreadConstraints()).isNotEqualTo(List.of(tsc));
     }
 
     @Test

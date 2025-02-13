@@ -50,6 +50,8 @@ public class KcEnvConfigSource extends PropertiesConfigSource {
                 PropertyMapper<?> mapper = PropertyMappers.getMapper(key);
 
                 if (mapper != null) {
+                    mapper = mapper.forEnvKey(key);
+
                     String to = mapper.getTo();
 
                     if (to != null) {
@@ -67,11 +69,5 @@ public class KcEnvConfigSource extends PropertiesConfigSource {
         }
 
         return properties;
-    }
-
-    @Override
-    // a workaround for https://github.com/smallrye/smallrye-config/issues/1207
-    public String getName() {
-        return NAME;
     }
 }

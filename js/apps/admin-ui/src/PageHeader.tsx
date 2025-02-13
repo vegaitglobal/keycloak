@@ -1,3 +1,4 @@
+import { useEnvironment, useHelp } from "@keycloak/keycloak-ui-shared";
 import {
   Avatar,
   Divider,
@@ -18,11 +19,16 @@ import { BarsIcon, EllipsisVIcon, HelpIcon } from "@patternfly/react-icons";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useHref } from "react-router-dom";
-import { useEnvironment, useHelp } from "@keycloak/keycloak-ui-shared";
+import { PageHeaderClearCachesModal } from "./PageHeaderClearCachesModal";
 import { HelpHeader } from "./components/help-enabler/HelpHeader";
+import { RealmPanel } from "./components/realm-selector/RealmPanel";
+import { useAccess } from "./context/access/Access";
 import { useRealm } from "./context/realm-context/RealmContext";
 import { useWhoAmI } from "./context/whoami/WhoAmI";
 import { toDashboard } from "./dashboard/routes/Dashboard";
+import { usePreviewLogo } from "./realm-settings/themes/LogoContext";
+import { joinPath } from "./utils/joinPath";
+import useToggle from "./utils/useToggle";
 
 const ManageAccountDropdownItem = () => {
   const { keycloak } = useEnvironment();
@@ -67,6 +73,20 @@ const ServerInfoDropdownItem = () => {
   );
 };
 
+const ClearCachesDropdownItem = () => {
+  const { t } = useTranslation();
+  const [open, toggleModal] = useToggle();
+
+  return (
+    <>
+      <DropdownItem key="clear caches" onClick={() => toggleModal()}>
+        {t("clearCachesTitle")}
+      </DropdownItem>
+      {open && <PageHeaderClearCachesModal onClose={() => toggleModal()} />}
+    </>
+  );
+};
+
 const HelpDropdownItem = () => {
   const { t } = useTranslation();
   const { enabled, toggleHelp } = useHelp();
@@ -81,23 +101,34 @@ const HelpDropdownItem = () => {
   );
 };
 
-const kebabDropdownItems = [
+const kebabDropdownItems = (isMasterRealm: boolean, isManager: boolean) => [
   <ManageAccountDropdownItem key="kebab Manage Account" />,
   <ServerInfoDropdownItem key="kebab Server Info" />,
+  ...(isMasterRealm && isManager
+    ? [<ClearCachesDropdownItem key="Clear Caches" />]
+    : []),
   <HelpDropdownItem key="kebab Help" />,
   <Divider component="li" key="kebab sign out separator" />,
   <SignOutDropdownItem key="kebab Sign out" />,
 ];
 
-const userDropdownItems = [
+const userDropdownItems = (isMasterRealm: boolean, isManager: boolean) => [
   <ManageAccountDropdownItem key="Manage Account" />,
   <ServerInfoDropdownItem key="Server info" />,
+  ...(isMasterRealm && isManager
+    ? [<ClearCachesDropdownItem key="Clear Caches" />]
+    : []),
   <Divider component="li" key="sign out separator" />,
   <SignOutDropdownItem key="Sign out" />,
 ];
 
 const KebabDropdown = () => {
   const [isDropdownOpen, setDropdownOpen] = useState(false);
+  const { realm } = useRealm();
+  const { hasAccess } = useAccess();
+
+  const isMasterRealm = realm === "master";
+  const isManager = hasAccess("manage-realm");
 
   return (
     <Dropdown
@@ -116,7 +147,9 @@ const KebabDropdown = () => {
       )}
       isOpen={isDropdownOpen}
     >
-      <DropdownList>{kebabDropdownItems}</DropdownList>
+      <DropdownList>
+        {kebabDropdownItems(isMasterRealm, isManager)}
+      </DropdownList>
     </Dropdown>
   );
 };
@@ -124,6 +157,11 @@ const KebabDropdown = () => {
 const UserDropdown = () => {
   const { whoAmI } = useWhoAmI();
   const [isDropdownOpen, setDropdownOpen] = useState(false);
+  const { realm } = useRealm();
+  const { hasAccess } = useAccess();
+
+  const isMasterRealm = realm === "master";
+  const isManager = hasAccess("manage-realm");
 
   return (
     <Dropdown
@@ -140,7 +178,7 @@ const UserDropdown = () => {
         </MenuToggle>
       )}
     >
-      <DropdownList>{userDropdownItems}</DropdownList>
+      <DropdownList>{userDropdownItems(isMasterRealm, isManager)}</DropdownList>
     </Dropdown>
   );
 };
@@ -149,9 +187,11 @@ export const Header = () => {
   const { environment, keycloak } = useEnvironment();
   const { t } = useTranslation();
   const { realm } = useRealm();
+  const contextLogo = usePreviewLogo();
+  const customLogo = contextLogo?.logo;
 
   const picture = keycloak.tokenParsed?.picture;
-  const logo = environment.logo ? environment.logo : "/logo.svg";
+  const logo = customLogo || environment.logo || "/logo.svg";
   const url = useHref(toDashboard({ realm }));
   const logoUrl = environment.logoUrl ? environment.logoUrl : url;
 
@@ -164,7 +204,11 @@ export const Header = () => {
       </MastheadToggle>
       <MastheadBrand href={logoUrl}>
         <img
-          src={environment.resourceUrl + logo}
+          src={
+            logo.startsWith("/")
+              ? joinPath(environment.resourceUrl, logo)
+              : logo
+          }
           id="masthead-logo"
           alt={t("logo")}
           aria-label={t("logo")}
@@ -172,6 +216,7 @@ export const Header = () => {
         />
       </MastheadBrand>
       <MastheadContent>
+        <RealmPanel />
         <Toolbar>
           <ToolbarContent>
             <ToolbarItem

@@ -126,7 +126,7 @@ export { UserDataTableToolbarItems } from "./components/users/UserDataTableToolb
 export { ViewHeader } from "./components/view-header/ViewHeader";
 export { WizardSectionHeader } from "./components/wizard-section-header/WizardSectionHeader";
 export { DefaultSwitchControl } from "./components/SwitchControl";
-export { useAccess, AccessContext } from "./context/access/Access";
+export { useAccess, AccessContextProvider } from "./context/access/Access";
 export { fetchAdminUI } from "./context/auth/admin-ui-endpoint";
 export {
   useRealm,
@@ -253,7 +253,9 @@ export { PoliciesTab } from "./realm-settings/PoliciesTab";
 export * as RealmSettingsSection from "./realm-settings/RealmSettingsSection";
 export { RealmSettingsTabs } from "./realm-settings/RealmSettingsTabs";
 export { RealmSettingsSessionsTab } from "./realm-settings/SessionsTab";
-export { RealmSettingsThemesTab } from "./realm-settings/ThemesTab";
+export * as ThemesTab from "./realm-settings/themes/ThemesTab";
+export { ThemeColors } from "./realm-settings/themes/ThemeColors";
+export { ThemeSettingsTab } from "./realm-settings/themes/ThemeSettings";
 export { RealmSettingsTokensTab } from "./realm-settings/TokensTab";
 export { UserRegistration } from "./realm-settings/UserRegistration";
 export { RevocationModal } from "./sessions/RevocationModal";
@@ -311,3 +313,6 @@ export { PageNotFoundSection } from "./PageNotFoundSection";
 export { App as AdminUi } from "./App";
 export type { Environment as AccountEnvironment } from "./environment";
 export { KeycloakProvider, useEnvironment } from "@keycloak/keycloak-ui-shared";
+export { AdminClientContext, initAdminClient } from "./admin-client";
+export { AppContexts } from "./App";
+export * as PermissionsConfigurationSection from "./permissions-configuration/PermissionsConfigurationSection";

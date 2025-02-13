@@ -45,6 +45,7 @@ import org.keycloak.credential.CredentialAuthentication;
 import org.keycloak.credential.CredentialInput;
 import org.keycloak.credential.CredentialInputUpdater;
 import org.keycloak.credential.CredentialInputValidator;
+import org.keycloak.credential.CredentialModel;
 import org.keycloak.credential.UserCredentialManager;
 import org.keycloak.federation.kerberos.KerberosPrincipal;
 import org.keycloak.federation.kerberos.impl.KerberosUsernamePasswordAuthenticator;
@@ -101,6 +102,8 @@ import org.keycloak.userprofile.UserProfileMetadata;
 import org.keycloak.userprofile.UserProfileUtil;
 
 import org.keycloak.utils.StreamsUtil;
+import org.keycloak.utils.StringUtil;
+
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -230,7 +233,7 @@ public class LDAPStorageProvider implements UserStorageProvider,
                 // Any attempt to write data, which are not supported by the LDAP schema, should fail
                 // This check is skipped when register new user as there are many "generic" attributes always written (EG. enabled, emailVerified) and those are usually unsupported by LDAP schema
                 if (!model.isImportEnabled() && !newUser) {
-                    UserModel readOnlyDelegate = new ReadOnlyUserModelDelegate(local, ModelException::new);
+                    UserModel readOnlyDelegate = new ReadOnlyUserModelDelegate(local, ReadOnlyException::new);
                     proxied = new LDAPWritesOnlyUserModelDelegate(readOnlyDelegate, this);
                 }
                 break;
@@ -353,8 +356,11 @@ public class LDAPStorageProvider implements UserStorageProvider,
 
         LDAPObject ldapObject = loadAndValidateUser(realm, user);
         if (ldapObject == null) {
-            logger.warnf("User '%s' can't be deleted from LDAP as it doesn't exist here", user.getUsername());
-            return false;
+            if (model.isRemoveInvalidUsersEnabled()) {
+                logger.warnf("User '%s' can't be deleted from LDAP as it doesn't exist here", user.getUsername());
+                return false;
+            }
+            return true;
         }
 
         ldapIdentityStore.remove(ldapObject);
@@ -621,18 +627,19 @@ public class LDAPStorageProvider implements UserStorageProvider,
      * @return ldapUser corresponding to local user or null if user is no longer in LDAP
      */
     protected LDAPObject loadAndValidateUser(RealmModel realm, UserModel local) {
-        LDAPObject existing = userManager.getManagedLDAPUser(local.getId());
+        // getFirstAttribute triggers validation and another call to this method, so we run it before checking the cache
+        String uuidLdapAttribute = local.getFirstAttribute(LDAPConstants.LDAP_ID);
+
+        LDAPObject existing = userManager.getManagedLDAPObject(local.getId());
         if (existing != null) {
             return existing;
         }
 
-        String uuidLdapAttribute = local.getFirstAttribute(LDAPConstants.LDAP_ID);
-
         LDAPObject ldapUser = loadLDAPUserByUuid(realm, uuidLdapAttribute);
-
         if(ldapUser == null){
             return null;
         }
+        userManager.setManagedLDAPObject(local.getId(), ldapUser);
         LDAPUtils.checkUuid(ldapUser, ldapIdentityStore.getConfig());
 
         if (ldapUser.getUuid().equals(local.getFirstAttribute(LDAPConstants.LDAP_ID))) {
@@ -1198,5 +1205,41 @@ public class LDAPStorageProvider implements UserStorageProvider,
         }
 
         return metadatas;
+    }
+
+    @Override
+    public Stream<CredentialModel> getCredentials(RealmModel realm, UserModel user) {
+        LDAPObject ldapObject = loadLDAPUserByUuid(realm, user.getFirstAttribute(LDAPConstants.LDAP_ID));
+
+        if (ldapObject == null) {
+            LDAPConfig config = getLdapIdentityStore().getConfig();
+            throw new IllegalStateException("LDAP object not found for user with attribute [" + config.getUuidLDAPAttributeName() + "] and value [" + user.getFirstAttribute(LDAPConstants.LDAP_ID) + "]");
+        }
+
+        CredentialModel credential = new CredentialModel();
+
+        credential.setType(PasswordCredentialModel.TYPE);
+        credential.setFederationLink(model.getId());
+        credential.setCreatedDate(getPasswordChangedTime(ldapObject));
+
+        return Stream.of(credential);
+    }
+
+    private long getPasswordChangedTime(LDAPObject ldapObject) {
+        String value = ldapObject.getAttributeAsString(getAttributeName());
+
+        if (StringUtil.isBlank(value)) {
+            return -1L;
+        }
+
+        if (LDAPConstants.PWD_LAST_SET.equals(getAttributeName())) {
+            return (Long.parseLong(value) / 10000L) - 11644473600000L;
+        }
+        return LDAPUtils.generalizedTimeToDate(value).getTime();
+    }
+
+    private String getAttributeName() {
+        LDAPConfig config = getLdapIdentityStore().getConfig();
+        return config.isActiveDirectory() ? LDAPConstants.PWD_LAST_SET : LDAPConstants.PWD_CHANGED_TIME;
     }
 }

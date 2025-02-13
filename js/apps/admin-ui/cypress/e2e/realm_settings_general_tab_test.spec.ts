@@ -1,4 +1,3 @@
-import { v4 as uuid } from "uuid";
 import { SERVER_URL } from "../support/constants";
 import LoginPage from "../support/pages/LoginPage";
 import Masthead from "../support/pages/admin-ui/Masthead";
@@ -13,7 +12,7 @@ const masthead = new Masthead();
 const realmSettingsPage = new RealmSettingsPage();
 
 describe("Realm settings general tab tests", () => {
-  const realmName = "Realm_" + uuid();
+  const realmName = "Realm_" + crypto.randomUUID();
 
   beforeEach(() => {
     loginPage.logIn();
@@ -43,21 +42,20 @@ describe("Realm settings general tab tests", () => {
     );
     realmSettingsPage.save(realmSettingsPage.generalSaveBtn);
     masthead.checkNotificationMessage("Realm successfully updated", true);
+  });
+
+  it("Test realm enable/disable switch", () => {
+    sidebarPage.goToRealmSettings();
 
     // Enable realm
     realmSettingsPage.toggleSwitch(`${realmName}-switch`);
-    masthead.checkNotificationMessage("Realm successfully updated");
-    sidebarPage.waitForPageLoad();
+    masthead.checkNotificationMessage("Realm successfully updated", true);
+    realmSettingsPage.assertSwitch(`${realmName}-switch`, true);
 
     // Disable realm
     realmSettingsPage.toggleSwitch(`${realmName}-switch`, false);
     realmSettingsPage.disableRealm();
     masthead.checkNotificationMessage("Realm successfully updated", true);
-    sidebarPage.waitForPageLoad();
-
-    // Re-enable realm
-    realmSettingsPage.toggleSwitch(`${realmName}-switch`);
-    masthead.checkNotificationMessage("Realm successfully updated");
   });
 
   it("Fail to set Realm ID to empty", () => {

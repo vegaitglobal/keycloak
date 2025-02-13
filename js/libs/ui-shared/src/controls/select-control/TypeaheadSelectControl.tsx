@@ -59,6 +59,7 @@ export const TypeaheadSelectControl = <
   const [focusedItemIndex, setFocusedItemIndex] = useState<number>(0);
   const textInputRef = useRef<HTMLInputElement>();
   const required = getRuleValue(controller.rules?.required) === true;
+  const isTypeaheadMulti = variant === SelectVariant.typeaheadMulti;
 
   const filteredOptions = options.filter((option) =>
     getValue(option).toLowerCase().startsWith(filterValue.toLowerCase()),
@@ -89,7 +90,7 @@ export const TypeaheadSelectControl = <
       case "Enter": {
         event.preventDefault();
 
-        if (variant !== SelectVariant.typeaheadMulti) {
+        if (!isTypeaheadMulti) {
           setFilterValue(getValue(focusedItem));
         } else {
           setFilterValue("");
@@ -160,7 +161,6 @@ export const TypeaheadSelectControl = <
         render={({ field }) => (
           <Select
             {...rest}
-            onClick={() => setOpen(!open)}
             onOpenChange={() => setOpen(false)}
             selected={
               isSelectBasedOptions(options)
@@ -173,12 +173,16 @@ export const TypeaheadSelectControl = <
                     .map((o) => o.value)
                 : field.value
             }
+            shouldFocusFirstItemOnOpen={false}
             toggle={(ref) => (
               <MenuToggle
                 ref={ref}
                 id={id || name.slice(name.lastIndexOf(".") + 1)}
                 variant="typeahead"
-                onClick={() => setOpen(!open)}
+                onClick={() => {
+                  setOpen(!open);
+                  textInputRef.current?.focus();
+                }}
                 isExpanded={open}
                 isFullWidth
                 status={get(errors, name) ? MenuToggleStatus.danger : undefined}
@@ -243,7 +247,7 @@ export const TypeaheadSelectControl = <
                         variant="plain"
                         onClick={() => {
                           setFilterValue("");
-                          field.onChange("");
+                          field.onChange(isTypeaheadMulti ? [] : "");
                           textInputRef?.current?.focus();
                         }}
                         aria-label="Clear input value"
@@ -258,10 +262,7 @@ export const TypeaheadSelectControl = <
             onSelect={(event, v) => {
               event?.stopPropagation();
               const option = v?.toString();
-              if (
-                variant === SelectVariant.typeaheadMulti &&
-                Array.isArray(field.value)
-              ) {
+              if (isTypeaheadMulti && Array.isArray(field.value)) {
                 if (field.value.includes(option)) {
                   field.onChange(
                     field.value.filter((item: string) => item !== option),

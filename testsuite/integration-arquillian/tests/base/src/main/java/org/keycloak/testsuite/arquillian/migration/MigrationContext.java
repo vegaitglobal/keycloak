@@ -22,12 +22,13 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileWriter;
 import java.io.PrintWriter;
-import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 
 import org.jboss.logging.Logger;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.common.util.StreamUtil;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
@@ -36,13 +37,25 @@ public class MigrationContext {
 
     public static final Logger logger = Logger.getLogger(MigrationContext.class);
 
+    private boolean runningMigrationTest = false;
+
+    /**
+     * @return true if testsuite is running migration test. This returns true during whole lifecycle of migration test (Including running of the old container as well as running the new container)
+     */
+    public boolean isRunningMigrationTest() {
+        return runningMigrationTest;
+    }
+
+    public void setRunningMigrationTest(boolean runningMigrationTest) {
+        this.runningMigrationTest = runningMigrationTest;
+    }
 
     public String loadOfflineToken() throws Exception {
         String file = getOfflineTokenLocation();
         logger.infof("Reading previously saved offline token from the file: %s", file);
 
         try (FileInputStream fis = new FileInputStream(file)) {
-            String offlineToken = StreamUtil.readString(fis, Charset.forName("UTF-8"));
+            String offlineToken = StreamUtil.readString(fis, StandardCharsets.UTF_8);
             logger.infof("Successfully read offline token: %s", offlineToken);
             File f = new File(file);
             f.delete();
@@ -67,7 +80,7 @@ public class MigrationContext {
             oauth.scope(OAuth2Constants.OFFLINE_ACCESS);
             oauth.realm("Migration");
             oauth.clientId("migration-test-client");
-            OAuthClient.AccessTokenResponse tokenResponse = oauth.doGrantAccessTokenRequest("secret", "offline-test-user", "password2");
+            AccessTokenResponse tokenResponse = oauth.doGrantAccessTokenRequest("secret", "offline-test-user", "password2");
             return tokenResponse.getRefreshToken();
         } catch (Exception e) {
             throw new RuntimeException(e);

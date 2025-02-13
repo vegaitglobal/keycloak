@@ -17,14 +17,22 @@
 
 package org.keycloak.testsuite.admin.client;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.StringReader;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
+
+import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.core.Response;
 import org.junit.After;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.keycloak.admin.client.resource.ClientResource;
@@ -44,9 +52,10 @@ import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
-import jakarta.ws.rs.NotFoundException;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import static org.keycloak.common.Profile.Feature.AUTHORIZATION;
 import static org.keycloak.testsuite.auth.page.AuthRealm.TEST;
 import static org.keycloak.testsuite.util.ServerURLs.getAuthServerContextRoot;
@@ -172,9 +181,14 @@ public class InstallationTest extends AbstractClientTest {
         assertThat(config, containsString(authServerUrl()));
     }
 
-    @Test(expected = NotFoundException.class)
+    @Test
     public void testSamlMetadataIdpDescriptor() {
-        samlClient.getInstallationProvider("saml-idp-descriptor");
+        try {
+            samlClient.getInstallationProvider("saml-idp-descriptor");
+            Assert.fail("Successful saml-idp-descriptor not expected");
+        } catch (NotFoundException nfe) {
+            // Expected
+        }
     }
 
     @Test
@@ -220,7 +234,8 @@ public class InstallationTest extends AbstractClientTest {
             assertThat(updater.getResource().toRepresentation().getAttributes().get(SamlConfigAttributes.SAML_FORCE_POST_BINDING), equalTo("true"));
 
             //error fallback
-            Document doc = getDocumentFromXmlString(updater.getResource().getInstallationProvider(SamlSPDescriptorClientInstallation.SAML_CLIENT_INSTALATION_SP_DESCRIPTOR));
+            String response = updater.getResource().getInstallationProvider(SamlSPDescriptorClientInstallation.SAML_CLIENT_INSTALATION_SP_DESCRIPTOR);
+            Document doc = getDocumentFromXmlString(response);
             Map<String, String> attrNamesAndValues = new HashMap<>();
             attrNamesAndValues.put("Binding", JBossSAMLURIConstants.SAML_HTTP_POST_BINDING.get());
             attrNamesAndValues.put("Location", "ERROR:ENDPOINT_NOT_SET");
@@ -231,7 +246,8 @@ public class InstallationTest extends AbstractClientTest {
             //fallback to adminUrl
             updater.setAdminUrl("https://admin-url").update();
             assertAdminEvents.assertEvent(getRealmId(), OperationType.UPDATE, AdminEventPaths.clientResourcePath(samlClientId), ResourceType.CLIENT);
-            doc = getDocumentFromXmlString(updater.getResource().getInstallationProvider(SamlSPDescriptorClientInstallation.SAML_CLIENT_INSTALATION_SP_DESCRIPTOR));
+            response = updater.getResource().getInstallationProvider(SamlSPDescriptorClientInstallation.SAML_CLIENT_INSTALATION_SP_DESCRIPTOR);
+            doc = getDocumentFromXmlString(response);
             attrNamesAndValues.put("Binding", JBossSAMLURIConstants.SAML_HTTP_POST_BINDING.get());
             attrNamesAndValues.put("Location", "https://admin-url");
             assertElements(doc, METADATA_NSURI.get(), "SingleLogoutService", attrNamesAndValues);
@@ -246,7 +262,8 @@ public class InstallationTest extends AbstractClientTest {
                    .update();
             assertAdminEvents.assertEvent(getRealmId(), OperationType.UPDATE, AdminEventPaths.clientResourcePath(samlClientId), ResourceType.CLIENT);
 
-            doc = getDocumentFromXmlString(updater.getResource().getInstallationProvider(SamlSPDescriptorClientInstallation.SAML_CLIENT_INSTALATION_SP_DESCRIPTOR));
+            response = updater.getResource().getInstallationProvider(SamlSPDescriptorClientInstallation.SAML_CLIENT_INSTALATION_SP_DESCRIPTOR);
+            doc = getDocumentFromXmlString(response);
             attrNamesAndValues.put("Binding", JBossSAMLURIConstants.SAML_HTTP_POST_BINDING.get());
             attrNamesAndValues.put("Location", "https://saml-logout-post-url");
             assertElements(doc, METADATA_NSURI.get(), "SingleLogoutService", attrNamesAndValues);
@@ -268,7 +285,8 @@ public class InstallationTest extends AbstractClientTest {
             assertThat(updater.getResource().toRepresentation().getAttributes().get(SamlConfigAttributes.SAML_FORCE_POST_BINDING), equalTo("false"));
 
             //error fallback
-            Document doc = getDocumentFromXmlString(updater.getResource().getInstallationProvider(SamlSPDescriptorClientInstallation.SAML_CLIENT_INSTALATION_SP_DESCRIPTOR));
+            String response = updater.getResource().getInstallationProvider(SamlSPDescriptorClientInstallation.SAML_CLIENT_INSTALATION_SP_DESCRIPTOR);
+            Document doc = getDocumentFromXmlString(response);
             Map<String, String> attrNamesAndValues = new HashMap<>();
             attrNamesAndValues.put("Binding", JBossSAMLURIConstants.SAML_HTTP_REDIRECT_BINDING.get());
             attrNamesAndValues.put("Location", "ERROR:ENDPOINT_NOT_SET");
@@ -279,7 +297,8 @@ public class InstallationTest extends AbstractClientTest {
             //fallback to adminUrl
             updater.setAdminUrl("https://admin-url").update();
             assertAdminEvents.assertEvent(getRealmId(), OperationType.UPDATE, AdminEventPaths.clientResourcePath(samlClientId), ResourceType.CLIENT);
-            doc = getDocumentFromXmlString(updater.getResource().getInstallationProvider(SamlSPDescriptorClientInstallation.SAML_CLIENT_INSTALATION_SP_DESCRIPTOR));
+            response = updater.getResource().getInstallationProvider(SamlSPDescriptorClientInstallation.SAML_CLIENT_INSTALATION_SP_DESCRIPTOR);
+            doc = getDocumentFromXmlString(response);
             attrNamesAndValues.put("Binding", JBossSAMLURIConstants.SAML_HTTP_REDIRECT_BINDING.get());
             attrNamesAndValues.put("Location", "https://admin-url");
             assertElements(doc, METADATA_NSURI.get(), "SingleLogoutService", attrNamesAndValues);
@@ -293,7 +312,8 @@ public class InstallationTest extends AbstractClientTest {
                    .setAttribute(SamlProtocol.SAML_SINGLE_LOGOUT_SERVICE_URL_REDIRECT_ATTRIBUTE, "https://saml-logout-redirect-url")
                    .update();
             assertAdminEvents.assertEvent(getRealmId(), OperationType.UPDATE, AdminEventPaths.clientResourcePath(samlClientId), ResourceType.CLIENT);
-            doc = getDocumentFromXmlString(updater.getResource().getInstallationProvider(SamlSPDescriptorClientInstallation.SAML_CLIENT_INSTALATION_SP_DESCRIPTOR));
+            response = updater.getResource().getInstallationProvider(SamlSPDescriptorClientInstallation.SAML_CLIENT_INSTALATION_SP_DESCRIPTOR);
+            doc = getDocumentFromXmlString(response);
             attrNamesAndValues.put("Binding", JBossSAMLURIConstants.SAML_HTTP_REDIRECT_BINDING.get());
             attrNamesAndValues.put("Location", "https://saml-logout-redirect-url");
             assertElements(doc, METADATA_NSURI.get(), "SingleLogoutService", attrNamesAndValues);
@@ -303,6 +323,43 @@ public class InstallationTest extends AbstractClientTest {
             assertElements(doc, METADATA_NSURI.get(), "AssertionConsumerService", attrNamesAndValues);
         }
         assertAdminEvents.assertEvent(getRealmId(), OperationType.UPDATE, AdminEventPaths.clientResourcePath(samlClientId), ResourceType.CLIENT);
+    }
+
+    @Test
+    public void testPemsInModAuthMellonExportShouldBeFormattedInRfc7468() throws IOException {
+        Response response = samlClient.getInstallationProviderAsResponse("mod-auth-mellon");
+        byte[] result = response.readEntity(byte[].class);
+
+        String clientPrivateKey = null;
+        String clientCert = null;
+        try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(result))) {
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                if (entry.getName().endsWith("client-private-key.pem")) {
+                    clientPrivateKey = new String(zis.readAllBytes(), StandardCharsets.US_ASCII);
+                }
+                else if (entry.getName().endsWith("client-cert.pem")) {
+                    clientCert = new String(zis.readAllBytes(), StandardCharsets.US_ASCII);
+                }
+            }
+        }
+
+        assertNotNull(clientPrivateKey);
+        assertNotNull(clientCert);
+        assertRfc7468PrivateKey(clientPrivateKey);
+        assertRfc7468Cert(clientCert);
+    }
+
+    private void assertRfc7468PrivateKey(String result) {
+        assertTrue(result.startsWith("-----BEGIN PRIVATE KEY-----"));
+        assertTrue(result.endsWith("-----END PRIVATE KEY-----"));
+        result.lines().forEach(line -> assertTrue(line.length() <= 64));
+    }
+
+    private void assertRfc7468Cert(String result) {
+        assertTrue(result.startsWith("-----BEGIN CERTIFICATE-----"));
+        assertTrue(result.endsWith("-----END CERTIFICATE-----"));
+        result.lines().forEach(line -> assertTrue(line.length() <= 64));
     }
 
     private Document getDocumentFromXmlString(String xml) throws SAXException, ParserConfigurationException, IOException {

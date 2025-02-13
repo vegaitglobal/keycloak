@@ -233,7 +233,7 @@ public class UserResource {
             throw ErrorResponse.exists("User exists with same username or email");
         } catch (ReadOnlyException re) {
             session.getTransactionManager().setRollbackOnly();
-            throw ErrorResponse.error("User is read only!", Status.BAD_REQUEST);
+            throw ErrorResponse.error(re.getMessage() == null ? "User is read only!" : re.getMessage(), Status.BAD_REQUEST);
         } catch (PasswordPolicyNotMetException e) {
             logger.warn("Password policy not met for user " + e.getUsername(), e);
             session.getTransactionManager().setRollbackOnly();
@@ -738,7 +738,8 @@ public class UserResource {
     @Operation()
     public Stream<CredentialRepresentation> credentials(){
         auth.users().requireView(user);
-        return user.credentialManager().getStoredCredentialsStream()
+
+        return user.credentialManager().getCredentials()
                 .map(ModelToRepresentation::toRepresentation)
                 .peek(credentialRepresentation -> credentialRepresentation.setSecretData(null));
     }
@@ -1030,7 +1031,13 @@ public class UserResource {
         try {
             if (user.isMemberOf(group)){
                 user.leaveGroup(group);
-                adminEvent.operation(OperationType.DELETE).resource(ResourceType.GROUP_MEMBERSHIP).representation(ModelToRepresentation.toRepresentation(group, true)).resourcePath(session.getContext().getUri()).success();
+                adminEvent.operation(OperationType.DELETE)
+                        .resource(ResourceType.GROUP_MEMBERSHIP)
+                        .representation(ModelToRepresentation.toRepresentation(group, true))
+                        .resourcePath(session.getContext().getUri())
+                        .detail(UserModel.USERNAME, user.getUsername())
+                        .detail(UserModel.EMAIL, user.getEmail())
+                        .success();
             }
         } catch (ModelIllegalStateException e) {
             logger.error(e.getMessage(), e);
@@ -1057,7 +1064,13 @@ public class UserResource {
 
         if (!RoleUtils.isDirectMember(user.getGroupsStream(),group)){
             user.joinGroup(group);
-            adminEvent.operation(OperationType.CREATE).resource(ResourceType.GROUP_MEMBERSHIP).representation(ModelToRepresentation.toRepresentation(group, true)).resourcePath(session.getContext().getUri()).success();
+            adminEvent.operation(OperationType.CREATE)
+                    .resource(ResourceType.GROUP_MEMBERSHIP)
+                    .representation(ModelToRepresentation.toRepresentation(group, true))
+                    .resourcePath(session.getContext().getUri())
+                    .detail(UserModel.USERNAME, user.getUsername())
+                    .detail(UserModel.EMAIL, user.getEmail())
+                    .success();
         }
     }
 
@@ -1125,7 +1138,7 @@ public class UserResource {
             throw ErrorResponse.error("Client doesn't exist", Status.BAD_REQUEST);
         }
         if (!client.isEnabled()) {
-            logger.debugf("Client %s is not enabled", clientId);
+            logger.debugf("Client %s is not enabled", client.getClientId());
             throw ErrorResponse.error("Client is not enabled", Status.BAD_REQUEST);
         }
 
@@ -1140,7 +1153,7 @@ public class UserResource {
             lifespan = realm.getActionTokenGeneratedByAdminLifespan();
         }
 
-        return new SendEmailParams(redirectUri, clientId, lifespan);
+        return new SendEmailParams(redirectUri, client.getClientId(), lifespan);
     }
 
     private static class SendEmailParams {

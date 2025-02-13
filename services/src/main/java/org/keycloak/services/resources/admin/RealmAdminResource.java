@@ -16,27 +16,11 @@
  */
 package org.keycloak.services.resources.admin;
 
-import static org.keycloak.util.JsonSerialization.readValue;
-
-import java.io.InputStream;
-import java.security.cert.X509Certificate;
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
-import java.util.Arrays;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-import jakarta.ws.rs.DefaultValue;
-import org.eclipse.microprofile.openapi.annotations.Operation;
-import org.eclipse.microprofile.openapi.annotations.extensions.Extension;
-import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import com.fasterxml.jackson.core.type.TypeReference;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.FormParam;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.NotFoundException;
@@ -51,9 +35,9 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Response.Status;
 import jakarta.ws.rs.core.StreamingOutput;
-
-import com.fasterxml.jackson.core.type.TypeReference;
-
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.extensions.Extension;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.reactive.NoCache;
@@ -92,6 +76,7 @@ import org.keycloak.models.UserSessionModel;
 import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.models.utils.ModelToRepresentation;
 import org.keycloak.models.utils.RepresentationToModel;
+import org.keycloak.organization.admin.resource.OrganizationsResource;
 import org.keycloak.partialimport.PartialImportResult;
 import org.keycloak.partialimport.PartialImportResults;
 import org.keycloak.representations.adapters.action.GlobalRequestResult;
@@ -113,12 +98,24 @@ import org.keycloak.services.resources.admin.ext.AdminRealmResourceProvider;
 import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
 import org.keycloak.services.resources.admin.permissions.AdminPermissionManagement;
 import org.keycloak.services.resources.admin.permissions.AdminPermissions;
+import org.keycloak.services.util.DateUtil;
 import org.keycloak.storage.DatastoreProvider;
 import org.keycloak.storage.ExportImportManager;
 import org.keycloak.storage.StoreSyncEvent;
 import org.keycloak.utils.GroupUtils;
 import org.keycloak.utils.ProfileHelper;
 import org.keycloak.utils.ReservedCharValidator;
+
+import java.io.InputStream;
+import java.security.cert.X509Certificate;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import static org.keycloak.util.JsonSerialization.readValue;
 
 /**
  * Base resource class for the admin REST api of one realm
@@ -130,6 +127,7 @@ import org.keycloak.utils.ReservedCharValidator;
 @Extension(name = KeycloakOpenAPI.Profiles.ADMIN, value = "")
 public class RealmAdminResource {
     protected static final Logger logger = Logger.getLogger(RealmAdminResource.class);
+
     protected final AdminPermissionEvaluator auth;
     protected final RealmModel realm;
     private final AdminEventBuilder adminEvent;
@@ -384,6 +382,7 @@ public class RealmAdminResource {
             rep.setDisplayName(realm.getDisplayName());
             rep.setDisplayNameHtml(realm.getDisplayNameHtml());
             rep.setSupportedLocales(realm.getSupportedLocalesStream().collect(Collectors.toSet()));
+            rep.setBruteForceProtected(realm.isBruteForceProtected());
 
             if (auth.users().canView()) {
                 rep.setRegistrationEmailAsUsername(realm.isRegistrationEmailAsUsername());
@@ -410,14 +409,20 @@ public class RealmAdminResource {
     public Response updateRealm(final RealmRepresentation rep) {
         auth.realm().requireManageRealm();
 
-        logger.debug("updating realm: " + realm.getName());
+        logger.debugf("updating realm: %s", realm.getName());
 
         if (Config.getAdminRealm().equals(realm.getName()) && (rep.getRealm() != null && !rep.getRealm().equals(Config.getAdminRealm()))) {
             throw ErrorResponse.error("Can't rename master realm", Status.BAD_REQUEST);
         }
 
-        ReservedCharValidator.validate(rep.getRealm());
-        ReservedCharValidator.validateLocales(rep.getSupportedLocales());
+        try {
+            ReservedCharValidator.validate(rep.getRealm());
+            ReservedCharValidator.validateLocales(rep.getSupportedLocales());
+            ReservedCharValidator.validateSecurityHeaders(rep.getBrowserSecurityHeaders());
+        } catch (ReservedCharValidator.ReservedCharException e) {
+            logger.error(e.getMessage(), e);
+            throw ErrorResponse.error(e.getMessage(), Status.BAD_REQUEST);
+        }
 
         try {
             if (!Constants.GENERATE.equals(rep.getPublicKey()) && (rep.getPrivateKey() != null && rep.getPublicKey() != null)) {
@@ -513,6 +518,7 @@ public class RealmAdminResource {
     @Tag(name = KeycloakOpenAPI.Admin.Tags.REALMS_ADMIN)
     @Operation()
     public ManagementPermissionReference getUserMgmtPermissions() {
+        ProfileHelper.requireFeature(Profile.Feature.ADMIN_FINE_GRAINED_AUTHZ);
         auth.realm().requireViewRealm();
 
         AdminPermissionManagement permissions = AdminPermissions.management(session, realm);
@@ -532,6 +538,7 @@ public class RealmAdminResource {
     @Tag(name = KeycloakOpenAPI.Admin.Tags.REALMS_ADMIN)
     @Operation()
     public ManagementPermissionReference setUsersManagementPermissionsEnabled(ManagementPermissionReference ref) {
+        ProfileHelper.requireFeature(Profile.Feature.ADMIN_FINE_GRAINED_AUTHZ);
         auth.realm().requireManageRealm();
 
         AdminPermissionManagement permissions = AdminPermissions.management(session, realm);
@@ -543,8 +550,7 @@ public class RealmAdminResource {
         }
     }
 
-
-    public static ManagementPermissionReference toUsersMgmtRef(AdminPermissionManagement permissions) {
+    private ManagementPermissionReference toUsersMgmtRef(AdminPermissionManagement permissions) {
         ManagementPermissionReference ref = new ManagementPermissionReference();
         ref.setEnabled(true);
         ref.setResource(permissions.users().resource().getId());
@@ -553,6 +559,10 @@ public class RealmAdminResource {
         return ref;
     }
 
+    @Path("organizations")
+    public OrganizationsResource organizations() {
+        return new OrganizationsResource(session, auth, adminEvent);
+    }
 
     @Path("{extension}")
     public Object extension(@PathParam("extension") String extension) {
@@ -740,7 +750,7 @@ public class RealmAdminResource {
     public void updateRealmEventsConfig(final RealmEventsConfigRepresentation rep) {
         auth.realm().requireManageEvents();
 
-        logger.debug("updating realm events config: " + realm.getName());
+        logger.debugf("updating realm events config: %s", realm.getName());
         new RealmManager(session).updateRealmEventsConfig(rep, realm);
         adminEvent.operation(OperationType.UPDATE).resource(ResourceType.REALM)
                 .resourcePath(session.getContext().getUri()).representation(rep)
@@ -773,11 +783,12 @@ public class RealmAdminResource {
     public Stream<EventRepresentation> getEvents(@Parameter(description = "The types of events to return") @QueryParam("type") List<String> types,
                                                  @Parameter(description = "App or oauth client name") @QueryParam("client") String client,
                                                  @Parameter(description = "User id") @QueryParam("user") String user,
-                                                 @Parameter(description = "From date") @QueryParam("dateFrom") String dateFrom,
-                                                 @Parameter(description = "To date") @QueryParam("dateTo") String dateTo,
+                                                 @Parameter(description = "From (inclusive) date (yyyy-MM-dd) or time in Epoch timestamp") @QueryParam("dateFrom") String dateFrom,
+                                                 @Parameter(description = "To (inclusive) date (yyyy-MM-dd) or time in Epoch timestamp") @QueryParam("dateTo") String dateTo,
                                                  @Parameter(description = "IP Address") @QueryParam("ipAddress") String ipAddress,
                                                  @Parameter(description = "Paging offset") @QueryParam("first") Integer firstResult,
-                                                 @Parameter(description = "Maximum results size (defaults to 100)") @QueryParam("max") Integer maxResults) {
+                                                 @Parameter(description = "Maximum results size (defaults to 100)") @QueryParam("max") Integer maxResults,
+                                                 @Parameter(description = "The direction to sort events by (asc or desc)") @QueryParam("direction") String direction) {
         auth.realm().requireViewEvents();
 
         EventStoreProvider eventStore = session.getProvider(EventStoreProvider.class);
@@ -800,30 +811,35 @@ public class RealmAdminResource {
         }
 
         if(dateFrom != null) {
-            SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd");
-            Date from = null;
             try {
-                from = df.parse(dateFrom);
-            } catch (ParseException e) {
-                throw new BadRequestException("Invalid value for 'Date(From)', expected format is yyyy-MM-dd");
+                query.fromDate(DateUtil.toStartOfDay(dateFrom));
+            } catch (Throwable t) {
+                throw new BadRequestException("Invalid value for 'dateFrom', expected format is yyyy-MM-dd or an Epoch timestamp");
             }
-            query.fromDate(from);
         }
 
         if(dateTo != null) {
-            SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd");
-            Date to = null;
             try {
-                to = df.parse(dateTo);
-            } catch (ParseException e) {
-                throw new BadRequestException("Invalid value for 'Date(To)', expected format is yyyy-MM-dd");
+                query.toDate(DateUtil.toEndOfDay(dateTo));
+            } catch (Throwable t) {
+                throw new BadRequestException("Invalid value for 'dateTo', expected format is yyyy-MM-dd or an Epoch timestamp");
             }
-            query.toDate(to);
         }
 
         if (ipAddress != null) {
             query.ipAddress(ipAddress);
         }
+
+        if (direction != null) {
+            if ("asc".equals(direction)) {
+                query.orderByAscTime();
+            } else if ("desc".equals(direction)) {
+                query.orderByDescTime();
+            } else {
+                throw new BadRequestException("Invalid value for sortDirection, expected value is asc or desc");
+            }
+        }
+
         if (firstResult != null) {
             query.firstResult(firstResult);
         }
@@ -861,10 +877,13 @@ public class RealmAdminResource {
     @Operation( summary = "Get admin events Returns all admin events, or filters events based on URL query parameters listed here")
     public Stream<AdminEventRepresentation> getEvents(@QueryParam("operationTypes") List<String> operationTypes, @QueryParam("authRealm") String authRealm, @QueryParam("authClient") String authClient,
                                                     @Parameter(description = "user id") @QueryParam("authUser") String authUser, @QueryParam("authIpAddress") String authIpAddress,
-                                                    @QueryParam("resourcePath") String resourcePath, @QueryParam("dateFrom") String dateFrom,
-                                                    @QueryParam("dateTo") String dateTo, @QueryParam("first") Integer firstResult,
+                                                    @QueryParam("resourcePath") String resourcePath,
+                                                    @Parameter(description = "From (inclusive) date (yyyy-MM-dd) or time in Epoch timestamp") @QueryParam("dateFrom") String dateFrom,
+                                                    @Parameter(description = "To (inclusive) date (yyyy-MM-dd) or time in Epoch timestamp") @QueryParam("dateTo") String dateTo,
+                                                    @QueryParam("first") Integer firstResult,
                                                     @Parameter(description = "Maximum results size (defaults to 100)") @QueryParam("max") Integer maxResults,
-                                                    @QueryParam("resourceTypes") List<String> resourceTypes) {
+                                                    @QueryParam("resourceTypes") List<String> resourceTypes,
+                                                    @Parameter(description = "The direction to sort events by (asc or desc)") @QueryParam("direction") String direction) {
         auth.realm().requireViewEvents();
 
         EventStoreProvider eventStore = session.getProvider(EventStoreProvider.class);
@@ -906,28 +925,30 @@ public class RealmAdminResource {
             query.resourceType(t);
         }
 
-
-
         if(dateFrom != null) {
-            SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd");
-            Date from = null;
             try {
-                from = df.parse(dateFrom);
-            } catch (ParseException e) {
-                throw new BadRequestException("Invalid value for 'Date(From)', expected format is yyyy-MM-dd");
+                query.fromTime(DateUtil.toStartOfDay(dateFrom));
+            } catch (Throwable t) {
+                throw new BadRequestException("Invalid value for 'dateFrom', expected format is yyyy-MM-dd or an Epoch timestamp");
             }
-            query.fromTime(from);
         }
 
         if(dateTo != null) {
-            SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd");
-            Date to = null;
             try {
-                to = df.parse(dateTo);
-            } catch (ParseException e) {
-                throw new BadRequestException("Invalid value for 'Date(To)', expected format is yyyy-MM-dd");
+                query.toTime(DateUtil.toEndOfDay(dateTo));
+            } catch (Throwable t) {
+                throw new BadRequestException("Invalid value for 'dateTo', expected format is yyyy-MM-dd or an Epoch timestamp");
             }
-            query.toTime(to);
+        }
+
+        if (direction != null) {
+            if ("asc".equals(direction)) {
+                query.orderByAscTime();
+            } else if ("desc".equals(direction)) {
+                query.orderByDescTime();
+            } else {
+                throw new BadRequestException("Invalid value for sortDirection, expected value is asc or desc");
+            }
         }
 
         if (firstResult != null) {

@@ -55,7 +55,7 @@ import org.keycloak.testsuite.updaters.RealmAttributeUpdater;
 import org.keycloak.testsuite.util.GreenMailRule;
 import org.keycloak.testsuite.util.MailUtils;
 import org.keycloak.testsuite.util.MailUtils.EmailBody;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
 import org.keycloak.testsuite.util.UserBuilder;
 
 public class OrganizationInvitationLinkTest extends AbstractOrganizationTest {
@@ -292,7 +292,7 @@ public class OrganizationInvitationLinkTest extends AbstractOrganizationTest {
     private void registerUser(OrganizationResource organization, String expectedEmail, String email) throws MessagingException, IOException {
         String link = getInvitationLinkFromEmail();
         driver.navigate().to(link);
-        Assert.assertFalse(organization.members().getAll().stream().anyMatch(actual -> email.equals(actual.getEmail())));
+        Assert.assertFalse(organization.members().list(-1, -1).stream().anyMatch(actual -> email.equals(actual.getEmail())));
         registerPage.assertCurrent(organizationName);
         assertThat(registerPage.getEmail(), equalTo(expectedEmail));
         registerPage.register("firstName", "lastName", email,
@@ -307,7 +307,7 @@ public class OrganizationInvitationLinkTest extends AbstractOrganizationTest {
         String link = getInvitationLinkFromEmail(user.getFirstName(), user.getLastName());
         driver.navigate().to(link);
         // not yet a member
-        Assert.assertFalse(organization.members().getAll().stream().anyMatch(actual -> user.getId().equals(actual.getId())));
+        Assert.assertFalse(organization.members().list(-1, -1).stream().anyMatch(actual -> user.getId().equals(actual.getId())));
         // confirm the intent of membership
         assertThat(driver.getPageSource(), containsString("You are about to join organization " + organizationName));
         assertThat(infoPage.getInfo(), containsString("By clicking on the link below, you will become a member of the " + organizationName + " organization:"));

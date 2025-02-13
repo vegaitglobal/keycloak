@@ -41,7 +41,9 @@ While were in the transitioning process towards Weblate, the following translati
 
 - German
 - Dutch
-- French
+- Japanese
+- Catalan
+- Spanish
 
 For all other translations, look for the `messages_*.properties` files in the main repository and create a pull request with your translations. 
 
@@ -51,8 +53,9 @@ If you have any questions or need assistance, feel free to reach out to the lang
 
 * German: [Robin Meese](https://github.com/robson90)
 * Dutch: [Jon Koops](https://github.com/jonkoops)
-* French: [Dimitri](https://github.com/DimitriDR) && [Gilbert Fernandes](https://github.com/gilbert-fernandes)
-
+* Japanese: [y-tabata](https://github.com/y-tabata) && [wadahiro](https://github.com/wadahiro)
+* Catalan: [jmallach](https://github.com/jmallach) && [Ecron](https://github.com/Ecron)
+* Spanish: [herver1971](https://github.com/herver1971) && [anthieni](https://github.com/anthieni)
 
 ### Steps to Add a New Language
 
@@ -62,5 +65,15 @@ If you have any questions or need assistance, feel free to reach out to the lang
 - The Keycloak-Team will then
     - enable the specific language
     - invite the two volunteers
-    - comment on discussion thread, that the langauge has been enabled
+    - comment on discussion thread, that the language has been enabled
 - Weblate synchronizes daily, so it may take up to 24 hours after enabling the language before you can start your first translations 
+
+### Translation status
+
+| Language                                                       | Account UI                                                                                    | Admin UI                                                                                    | Theme base/account                                                                                   | Theme base/admin                                                                                   | Theme base/email                                                                                   | Theme base/login                                                                                   | Overall                                                                              |
+|----------------------------------------------------------------|-----------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------|
+| [German](https://hosted.weblate.org/projects/keycloak/-/de/)   | ![Translation status](https://hosted.weblate.org/widget/keycloak/account-ui/de/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/admin-ui/de/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baseaccount/de/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baseadmin/de/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baseemail/de/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baselogin/de/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/-/de/svg-badge.svg) |
+| [Dutch](https://hosted.weblate.org/projects/keycloak/-/nl/)    | ![Translation status](https://hosted.weblate.org/widget/keycloak/account-ui/nl/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/admin-ui/nl/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baseaccount/nl/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baseadmin/nl/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baseemail/nl/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baselogin/nl/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/-/nl/svg-badge.svg) |
+| [Japanese](https://hosted.weblate.org/projects/keycloak/-/ja/) | ![Translation status](https://hosted.weblate.org/widget/keycloak/account-ui/ja/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/admin-ui/ja/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baseaccount/ja/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baseadmin/ja/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baseemail/ja/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baselogin/ja/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/-/ja/svg-badge.svg) |
+| [Catalan](https://hosted.weblate.org/projects/keycloak/-/ca/)  | ![Translation status](https://hosted.weblate.org/widget/keycloak/account-ui/ca/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/admin-ui/ca/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baseaccount/ca/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baseadmin/ca/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baseemail/ca/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baselogin/ca/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/-/ca/svg-badge.svg) |
+| [Spanish](https://hosted.weblate.org/projects/keycloak/-/es/)  | ![Translation status](https://hosted.weblate.org/widget/keycloak/account-ui/es/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/admin-ui/es/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baseaccount/es/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baseadmin/es/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baseemail/es/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/theme-baselogin/es/svg-badge.svg) | ![Translation status](https://hosted.weblate.org/widget/keycloak/-/es/svg-badge.svg) |

@@ -179,9 +179,80 @@ public class LoggingConfigurationTest extends AbstractConfigurationTest {
 
         assertExternalConfig(Map.of(
                 "quarkus.log.level", "DEBUG",
-                "quarkus.log.console.level", "info",
-                "quarkus.log.syslog.level", "trace",
-                "quarkus.log.file.level", "debug"
+                "quarkus.log.console.level", "INFO",
+                "quarkus.log.syslog.level", "TRACE",
+                "quarkus.log.file.level", "DEBUG"
+        ));
+    }
+
+    @Test
+    public void logLevelTakesPrecedenceOverCategoryLevel() {
+        ConfigArgsConfigSource.setCliArgs("--log-level=org.keycloak:error");
+        SmallRyeConfig config = createConfig();
+        assertEquals("INFO", config.getConfigValue("quarkus.log.level").getValue());
+        assertEquals("ERROR", config.getConfigValue("quarkus.log.category.\"org.keycloak\".level").getValue());
+
+        ConfigArgsConfigSource.setCliArgs("--log-level=org.keycloak:error", "--log-level-org.keycloak=trace");
+        config = createConfig();
+        assertEquals("INFO", config.getConfigValue("quarkus.log.level").getValue());
+        assertEquals("TRACE", config.getConfigValue("quarkus.log.category.\"org.keycloak\".level").getValue());
+    }
+
+    @Test
+    public void unknownCategoryLevelIsResolvedFromRootLevel() {
+        ConfigArgsConfigSource.setCliArgs("--log-level=warn,org.keycloak:error", "--log-level-org.keycloak=trace");
+        SmallRyeConfig config = createConfig();
+        assertEquals("WARN", config.getConfigValue("quarkus.log.level").getValue());
+        assertEquals("TRACE", config.getConfigValue("quarkus.log.category.\"org.keycloak\".level").getValue());
+        assertEquals("WARN", config.getConfigValue("quarkus.log.category.\"foo.bar\".level").getValue());
+    }
+
+    @Test
+    public void jsonDefaultFormat() {
+        initConfig();
+
+        assertConfig(Map.of(
+                "log-console-json-format", "default",
+                "log-file-json-format", "default",
+                "log-syslog-json-format", "default"
+        ));
+
+        assertExternalConfig(Map.of(
+                "quarkus.log.console.json.log-format", "default",
+                "quarkus.log.file.json.log-format", "default",
+                "quarkus.log.syslog.json.log-format", "default"
+        ));
+    }
+
+    @Test
+    public void jsonEcsFormat() {
+        putEnvVars(Map.of(
+                "KC_LOG_CONSOLE_OUTPUT", "json",
+                "KC_LOG_CONSOLE_JSON_FORMAT", "ecs",
+                "KC_LOG_FILE_OUTPUT", "json",
+                "KC_LOG_FILE_JSON_FORMAT", "ecs",
+                "KC_LOG_SYSLOG_OUTPUT", "json",
+                "KC_LOG_SYSLOG_JSON_FORMAT", "ecs"
+        ));
+
+        initConfig();
+
+        assertConfig(Map.of(
+                "log-console-output", "json",
+                "log-console-json-format", "ecs",
+                "log-file-output", "json",
+                "log-file-json-format", "ecs",
+                "log-syslog-output", "json",
+                "log-syslog-json-format", "ecs"
+        ));
+
+        assertExternalConfig(Map.of(
+                "quarkus.log.console.json", "true",
+                "quarkus.log.console.json.log-format", "ecs",
+                "quarkus.log.file.json", "true",
+                "quarkus.log.file.json.log-format", "ecs",
+                "quarkus.log.syslog.json", "true",
+                "quarkus.log.syslog.json.log-format", "ecs"
         ));
     }
 }

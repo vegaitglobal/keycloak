@@ -22,7 +22,6 @@ import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.EnvVarBuilder;
 import io.fabric8.kubernetes.api.model.EnvVarSource;
 import io.fabric8.kubernetes.api.model.EnvVarSourceBuilder;
-import io.fabric8.kubernetes.api.model.PodSpec;
 import io.fabric8.kubernetes.api.model.PodSpecFluent;
 import io.fabric8.kubernetes.api.model.PodTemplateSpec;
 import io.fabric8.kubernetes.api.model.Secret;
@@ -31,7 +30,6 @@ import io.fabric8.kubernetes.api.model.VolumeBuilder;
 import io.fabric8.kubernetes.api.model.VolumeMountBuilder;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder;
-import io.fabric8.kubernetes.api.model.apps.StatefulSetSpec;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.javaoperatorsdk.operator.api.reconciler.Context;
 import io.javaoperatorsdk.operator.processing.dependent.kubernetes.CRUDKubernetesDependentResource;
@@ -40,6 +38,7 @@ import io.quarkus.logging.Log;
 
 import org.keycloak.operator.Config;
 import org.keycloak.operator.Constants;
+import org.keycloak.operator.ContextUtils;
 import org.keycloak.operator.Utils;
 import org.keycloak.operator.crds.v2alpha1.deployment.Keycloak;
 import org.keycloak.operator.crds.v2alpha1.deployment.KeycloakSpec;
@@ -71,8 +70,11 @@ import java.util.stream.Stream;
 import static org.keycloak.operator.Utils.addResources;
 import static org.keycloak.operator.controllers.KeycloakDistConfigurator.getKeycloakOptionEnvVarName;
 import static org.keycloak.operator.crds.v2alpha1.CRDUtils.isTlsConfigured;
+import static org.keycloak.operator.crds.v2alpha1.deployment.spec.TracingSpec.convertTracingAttributesToString;
 
 public class KeycloakDeploymentDependentResource extends CRUDKubernetesDependentResource<StatefulSet, Keycloak> {
+
+    public static final String POD_IP = "POD_IP";
 
     private static final List<String> COPY_ENV = Arrays.asList("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY");
 
@@ -128,32 +130,33 @@ public class KeycloakDeploymentDependentResource extends CRUDKubernetesDependent
         addEnvVars(baseDeployment, primary, allSecrets);
         addResources(primary.getSpec().getResourceRequirements(), operatorConfig, kcContainer);
         Optional.ofNullable(primary.getSpec().getCacheSpec())
-                .ifPresent(c -> configureCache(primary, baseDeployment, kcContainer, c, context.getClient()));
+                .ifPresent(c -> configureCache(baseDeployment, kcContainer, c, context.getClient()));
 
         if (!allSecrets.isEmpty()) {
             watchedResources.annotateDeployment(new ArrayList<>(allSecrets), Secret.class, baseDeployment, context.getClient());
         }
 
-        StatefulSet existingDeployment = context.getSecondaryResource(StatefulSet.class).orElse(null);
-        if (existingDeployment == null) {
-            Log.debug("No existing Deployment found, using the default");
-        }
-        else {
-            Log.debug("Existing Deployment found, handling migration");
-
-            // version 22 changed the match labels, account for older versions
-            if (!existingDeployment.isMarkedForDeletion() && !hasExpectedMatchLabels(existingDeployment, primary)) {
-                context.getClient().resource(existingDeployment).lockResourceVersion().delete();
-                Log.info("Existing Deployment found with old label selector, it will be recreated");
-            }
-
-            migrateDeployment(existingDeployment, baseDeployment, context);
+        var upgradeType = ContextUtils.getUpgradeType(context);
+        // empty means no existing stateful set.
+        if (upgradeType.isEmpty()) {
+            return baseDeployment;
         }
 
-        return baseDeployment;
+        var existingDeployment = ContextUtils.getCurrentStatefulSet(context);
+
+        // version 22 changed the match labels, account for older versions
+        if (!existingDeployment.isMarkedForDeletion() && !hasExpectedMatchLabels(existingDeployment, primary)) {
+            context.getClient().resource(existingDeployment).lockResourceVersion().delete();
+            Log.info("Existing Deployment found with old label selector, it will be recreated");
+        }
+
+        return switch (upgradeType.get()) {
+            case ROLLING -> handleRollingUpdate(baseDeployment);
+            case RECREATE -> handleRecreateUpdate(existingDeployment, baseDeployment);
+        };
     }
 
-    private void configureCache(Keycloak keycloakCR, StatefulSet deployment, Container kcContainer, CacheSpec spec, KubernetesClient client) {
+    private void configureCache(StatefulSet deployment, Container kcContainer, CacheSpec spec, KubernetesClient client) {
         Optional.ofNullable(spec.getConfigMapFile()).ifPresent(configFile -> {
             if (configFile.getName() == null || configFile.getKey() == null) {
                 throw new IllegalStateException("Cache file ConfigMap requires both a name and a key");
@@ -295,14 +298,13 @@ public class KeycloakDeploymentDependentResource extends CRUDKubernetesDependent
                         && (customImage.isPresent() || operatorConfig.keycloak().startOptimized())) {
             containerBuilder.addToArgs(OPTIMIZED_ARG);
         }
+        // Set bind address as this is required for JGroups to form a cluster in IPv6 envionments
+        containerBuilder.addToArgs(0, "-Djgroups.bind.address=$(%s)".formatted(POD_IP));
         containerBuilder.addToArgs(0, getJGroupsParameter(keycloakCR));
 
         // probes
         var protocol = isTlsConfigured(keycloakCR) ? "HTTPS" : "HTTP";
-        var port = Optional.ofNullable(keycloakCR.getSpec())
-                .map(KeycloakSpec::getHttpManagementSpec)
-                .map(HttpManagementSpec::getPort)
-                .orElse(Constants.KEYCLOAK_MANAGEMENT_PORT);
+        var port = HttpManagementSpec.managementPort(keycloakCR);
         var relativePath = readConfigurationValue(Constants.KEYCLOAK_HTTP_MANAGEMENT_RELATIVE_PATH_KEY, keycloakCR, context)
                 .or(() -> readConfigurationValue(Constants.KEYCLOAK_HTTP_RELATIVE_PATH_KEY, keycloakCR, context))
                 .map(path -> !path.endsWith("/") ? path + "/" : path)
@@ -343,7 +345,7 @@ public class KeycloakDeploymentDependentResource extends CRUDKubernetesDependent
         }
 
         // add in ports - there's no merging being done here
-        final StatefulSet baseDeployment = containerBuilder
+        return containerBuilder
             .addNewPort()
                 .withName(Constants.KEYCLOAK_HTTPS_PORT_NAME)
                 .withContainerPort(Constants.KEYCLOAK_HTTPS_PORT)
@@ -360,8 +362,6 @@ public class KeycloakDeploymentDependentResource extends CRUDKubernetesDependent
                 .withProtocol(Constants.KEYCLOAK_SERVICE_PROTOCOL)
             .endPort()
             .endContainer().endSpec().endTemplate().endSpec().build();
-
-        return baseDeployment;
     }
 
     private void handleScheduling(Keycloak keycloakCR, Map<String, String> labels, PodSpecFluent<?> specBuilder) {
@@ -424,20 +424,7 @@ public class KeycloakDeploymentDependentResource extends CRUDKubernetesDependent
         // include the kube CA if the user is not controlling KC_TRUSTSTORE_PATHS via the unsupported or the additional
         varMap.putIfAbsent(KC_TRUSTSTORE_PATHS, new EnvVarBuilder().withName(KC_TRUSTSTORE_PATHS).withValue(truststores).build());
 
-        varMap.putIfAbsent(KC_TRACING_SERVICE_NAME,
-                new EnvVarBuilder().withName(KC_TRACING_SERVICE_NAME)
-                        .withValue(keycloakCR.getMetadata().getName())
-                        .build()
-        );
-
-        // Possible OTel k8s attributes convention can be found here: https://opentelemetry.io/docs/specs/semconv/attributes-registry/k8s/#kubernetes-attributes
-        var tracingAttributes = Map.of("k8s.namespace.name", keycloakCR.getMetadata().getNamespace());
-
-        varMap.putIfAbsent(KC_TRACING_RESOURCE_ATTRIBUTES,
-                new EnvVarBuilder().withName(KC_TRACING_RESOURCE_ATTRIBUTES)
-                        .withValue(tracingAttributes.entrySet().stream().map(e -> e.getKey() + "=" + e.getValue()).collect(Collectors.joining(",")))
-                        .build()
-        );
+        setTracingEnvVars(keycloakCR, varMap);
 
         var envVars = new ArrayList<>(varMap.values());
         baseDeployment.getSpec().getTemplate().getSpec().getContainers().get(0).setEnv(envVars);
@@ -451,13 +438,44 @@ public class KeycloakDeploymentDependentResource extends CRUDKubernetesDependent
         allSecrets.addAll(serverConfigSecretsNames);
     }
 
+    private static void setTracingEnvVars(Keycloak keycloakCR, Map<String, EnvVar> varMap) {
+        varMap.putIfAbsent(KC_TRACING_SERVICE_NAME,
+                new EnvVarBuilder().withName(KC_TRACING_SERVICE_NAME)
+                        .withValue(keycloakCR.getMetadata().getName())
+                        .build()
+        );
+
+        // Possible OTel k8s attributes convention can be found here: https://opentelemetry.io/docs/specs/semconv/attributes-registry/k8s/#kubernetes-attributes
+        var tracingAttributes = Map.of("k8s.namespace.name", keycloakCR.getMetadata().getNamespace());
+
+        if (varMap.containsKey(KC_TRACING_RESOURCE_ATTRIBUTES)) {
+            // append 'tracingAttributes' to the existing attributes defined in the 'KC_TRACING_RESOURCE_ATTRIBUTES' env var
+            var existingAttributes = convertTracingAttributesToMap(varMap);
+            tracingAttributes.forEach(existingAttributes::putIfAbsent);
+            varMap.get(KC_TRACING_RESOURCE_ATTRIBUTES).setValue(convertTracingAttributesToString(existingAttributes));
+        } else {
+            varMap.put(KC_TRACING_RESOURCE_ATTRIBUTES,
+                    new EnvVarBuilder().withName(KC_TRACING_RESOURCE_ATTRIBUTES)
+                            .withValue(convertTracingAttributesToString(tracingAttributes))
+                            .build()
+            );
+        }
+    }
+
+    private static Map<String, String> convertTracingAttributesToMap(Map<String, EnvVar> envVars) {
+        return Arrays.stream(Optional.ofNullable(envVars.get(KC_TRACING_RESOURCE_ATTRIBUTES).getValue()).orElse("").split(","))
+                .filter(entry -> entry.contains("="))
+                .map(entry -> entry.split("=", 2))
+                .collect(Collectors.toMap(entry -> entry[0], entry -> entry[1]));
+    }
+
     private List<EnvVar> getDefaultAndAdditionalEnvVars(Keycloak keycloakCR) {
         // default config values
         List<ValueOrSecret> serverConfigsList = new ArrayList<>(Constants.DEFAULT_DIST_CONFIG_LIST);
 
         // merge with the CR; the values in CR take precedence
         if (keycloakCR.getSpec().getAdditionalOptions() != null) {
-            Set<String> inCr = keycloakCR.getSpec().getAdditionalOptions().stream().map(v -> v.getName()).collect(Collectors.toSet());
+            Set<String> inCr = keycloakCR.getSpec().getAdditionalOptions().stream().map(ValueOrSecret::getName).collect(Collectors.toSet());
             serverConfigsList.removeIf(v -> inCr.contains(v.getName()));
             serverConfigsList.addAll(keycloakCR.getSpec().getAdditionalOptions());
         }
@@ -484,33 +502,14 @@ public class KeycloakDeploymentDependentResource extends CRUDKubernetesDependent
             }
         }
 
+        envVars.add(new EnvVarBuilder().withName(POD_IP).withNewValueFrom().withNewFieldRef()
+                .withFieldPath("status.podIP").endFieldRef().endValueFrom().build());
+
         return envVars;
     }
 
     public static String getName(Keycloak keycloak) {
         return keycloak.getMetadata().getName();
-    }
-
-    public void migrateDeployment(StatefulSet previousDeployment, StatefulSet reconciledDeployment, Context<Keycloak> context) {
-        var previousContainer = Optional.ofNullable(previousDeployment).map(StatefulSet::getSpec)
-                .map(StatefulSetSpec::getTemplate).map(PodTemplateSpec::getSpec).map(PodSpec::getContainers)
-                .flatMap(c -> c.stream().findFirst()).orElse(null);
-        if (previousContainer == null) {
-            return;
-        }
-        var reconciledContainer = reconciledDeployment.getSpec().getTemplate().getSpec().getContainers().get(0);
-
-        if (!previousContainer.getImage().equals(reconciledContainer.getImage())
-                && previousDeployment.getStatus().getReplicas() > 0) {
-            // TODO Check if migration is really needed (e.g. based on actual KC version); https://github.com/keycloak/keycloak/issues/10441
-            Log.info("Detected changed Keycloak image, assuming Keycloak upgrade. Scaling down the deployment to one instance to perform a safe database migration");
-            Log.infof("original image: %s; new image: %s", previousContainer.getImage(), reconciledContainer.getImage());
-
-            reconciledContainer.setImage(previousContainer.getImage());
-            reconciledDeployment.getSpec().setReplicas(0);
-
-            reconciledDeployment.getMetadata().getAnnotations().put(Constants.KEYCLOAK_MIGRATING_ANNOTATION, Boolean.TRUE.toString());
-        }
     }
 
     protected Optional<String> readConfigurationValue(String key, Keycloak keycloakCR, Context<Keycloak> context) {
@@ -532,6 +531,31 @@ public class KeycloakDeploymentDependentResource extends CRUDKubernetesDependent
             }
             throw new IllegalStateException("Secret " + secretSelector.getName() + " doesn't contain the expected key " + secretSelector.getKey());
         }));
+    }
+
+    private static StatefulSet handleRollingUpdate(StatefulSet desired) {
+        // return the desired stateful set since Kubernetes does a rolling in-place upgrade by default.
+        Log.debug("Performing a rolling upgrade");
+        return desired;
+    }
+
+    private static StatefulSet  handleRecreateUpdate(StatefulSet actual, StatefulSet desired) {
+        if (actual.getStatus().getReplicas() == 0) {
+            Log.debug("Performing a recreate upgrade - scaling up the stateful set");
+            return desired;
+        }
+        Log.debug("Performing a recreate upgrade - scaling down the stateful set");
+        // return the existing stateful set, but set replicas to zero
+        var builder = actual.toBuilder();
+        builder.editSpec()
+                .withReplicas(0)
+                .endSpec();
+        // update metadata from the new stateful set, it is safe to do so.
+        builder.withMetadata(desired.getMetadata());
+        builder.editMetadata()
+                .addToAnnotations(Constants.KEYCLOAK_MIGRATING_ANNOTATION, Boolean.TRUE.toString())
+                .endMetadata();
+        return builder.build();
     }
 
 }

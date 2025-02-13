@@ -19,11 +19,13 @@ package org.keycloak.testsuite.broker;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.greaterThan;
+import static org.hamcrest.Matchers.lessThanOrEqualTo;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.nullValue;
 import static org.keycloak.testsuite.broker.BrokerTestConstants.IDP_OIDC_ALIAS;
 import static org.keycloak.testsuite.util.ProtocolMapperUtil.createHardcodedClaim;
-
-import java.util.concurrent.TimeUnit;
 
 import jakarta.ws.rs.client.Client;
 import jakarta.ws.rs.client.Entity;
@@ -32,6 +34,8 @@ import jakarta.ws.rs.core.Form;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Response.Status;
+import java.io.Closeable;
+import java.util.Map;
 import org.junit.Test;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.admin.client.resource.ClientResource;
@@ -41,7 +45,6 @@ import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.authorization.model.Policy;
 import org.keycloak.authorization.model.ResourceServer;
 import org.keycloak.broker.oidc.mappers.UserAttributeMapper;
-import org.keycloak.common.Profile;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.IdentityProviderMapperModel;
 import org.keycloak.models.IdentityProviderMapperSyncMode;
@@ -50,6 +53,7 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.protocol.oidc.OIDCConfigAttributes;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
+import org.keycloak.representations.AccessTokenResponse;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.IdentityProviderMapperRepresentation;
 import org.keycloak.representations.idm.IdentityProviderRepresentation;
@@ -58,15 +62,17 @@ import org.keycloak.representations.idm.authorization.ClientPolicyRepresentation
 import org.keycloak.services.resources.admin.permissions.AdminPermissionManagement;
 import org.keycloak.services.resources.admin.permissions.AdminPermissions;
 import org.keycloak.testsuite.Assert;
-import org.keycloak.testsuite.arquillian.annotation.EnableFeature;
-import org.keycloak.testsuite.arquillian.annotation.EnableFeatures;
+import org.keycloak.testsuite.admin.ApiUtil;
+import org.keycloak.testsuite.updaters.IdentityProviderAttributeUpdater;
 import org.keycloak.testsuite.util.AdminClientUtil;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
+import org.keycloak.testsuite.util.ServerURLs;
 import org.keycloak.util.BasicAuthHelper;
-import com.google.common.collect.ImmutableMap;
 
-@EnableFeatures({@EnableFeature(Profile.Feature.TOKEN_EXCHANGE), @EnableFeature(Profile.Feature.ADMIN_FINE_GRAINED_AUTHZ)})
-public final class KcOidcBrokerTokenExchangeTest extends AbstractInitializedBaseBrokerTest {
+/**
+ * Test for identity-provider token exchange scenarios. Base for tests of token-exchange V1 as well as token-exchange-federated V2
+ */
+public abstract class KcOidcBrokerTokenExchangeTest extends AbstractInitializedBaseBrokerTest {
 
     @Override
     protected BrokerConfiguration getBrokerConfiguration() {
@@ -75,6 +81,17 @@ public final class KcOidcBrokerTokenExchangeTest extends AbstractInitializedBase
 
     @Test
     public void testExternalInternalTokenExchange() throws Exception {
+        assertExternalToInternalExchange(bc.getIDPAlias());
+    }
+
+    @Test
+    public void testExternalInternalTokenExchangeUsingIssuer() throws Exception {
+        RealmResource consumerRealm = realmsResouce().realm(bc.consumerRealmName());
+        IdentityProviderRepresentation broker = consumerRealm.identityProviders().get(bc.getIDPAlias()).toRepresentation();
+        assertExternalToInternalExchange(broker.getConfig().get(OIDCIdentityProviderConfigRep.ISSUER));
+    }
+
+    private void assertExternalToInternalExchange(String subjectIssuer) throws Exception {
         RealmResource providerRealm = realmsResouce().realm(bc.providerRealmName());
         ClientsResource clients = providerRealm.clients();
         ClientRepresentation brokerApp = clients.findByClientId("brokerapp").get(0);
@@ -87,17 +104,24 @@ public final class KcOidcBrokerTokenExchangeTest extends AbstractInitializedBase
         hardCodedSessionNoteMapper.setName("hard-coded");
         hardCodedSessionNoteMapper.setIdentityProviderAlias(bc.getIDPAlias());
         hardCodedSessionNoteMapper.setIdentityProviderMapper(UserAttributeMapper.PROVIDER_ID);
-        hardCodedSessionNoteMapper.setConfig(ImmutableMap.<String, String>builder()
-                .put(IdentityProviderMapperModel.SYNC_MODE, IdentityProviderMapperSyncMode.INHERIT.toString())
-                .put(UserAttributeMapper.USER_ATTRIBUTE, "mapped-from-claim")
-                .put(UserAttributeMapper.CLAIM, "hard-coded")
-                .build());
+        hardCodedSessionNoteMapper.setConfig(Map.of(
+                IdentityProviderMapperModel.SYNC_MODE, IdentityProviderMapperSyncMode.INHERIT.toString(),
+                UserAttributeMapper.USER_ATTRIBUTE, "mapped-from-claim",
+                UserAttributeMapper.CLAIM, "hard-coded"));
 
         RealmResource consumerRealm = realmsResouce().realm(bc.consumerRealmName());
         IdentityProviderResource identityProviderResource = consumerRealm.identityProviders().get(bc.getIDPAlias());
+
+        // if auth.server.host != auth.server.host2 we need to update the issuer in the IDP config
+        IdentityProviderRepresentation representation = identityProviderResource.toRepresentation();
+        if (!representation.getConfig().get("issuer").startsWith(ServerURLs.getAuthServerContextRoot())) {
+            representation.getConfig().put("issuer", ServerURLs.getAuthServerContextRoot() + "/auth/realms/provider");
+            identityProviderResource.update(representation);
+        }
+
         identityProviderResource.addMapper(hardCodedSessionNoteMapper).close();
 
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doGrantAccessTokenRequest(bc.providerRealmName(), bc.getUserLogin(), bc.getUserPassword(), null, brokerApp.getClientId(), brokerApp.getSecret());
+        org.keycloak.testsuite.util.oauth.AccessTokenResponse tokenResponse = oauth.realm(bc.providerRealmName()).doGrantAccessTokenRequest(bc.getUserLogin(), bc.getUserPassword(), brokerApp.getClientId(), brokerApp.getSecret());
         assertThat(tokenResponse.getIdToken(), notNullValue());
 
         testingClient.server(BrokerTestConstants.REALM_CONS_NAME).run(KcOidcBrokerTokenExchangeTest::setupRealm);
@@ -107,7 +131,7 @@ public final class KcOidcBrokerTokenExchangeTest extends AbstractInitializedBase
         Client httpClient = AdminClientUtil.createResteasyClient();
 
         try {
-            WebTarget exchangeUrl = httpClient.target(OAuthClient.AUTH_SERVER_ROOT)
+            WebTarget exchangeUrl = httpClient.target(ServerURLs.getAuthServerContextRoot() + "/auth")
                     .path("/realms")
                     .path(bc.consumerRealmName())
                     .path("protocol/openid-connect/token");
@@ -120,7 +144,7 @@ public final class KcOidcBrokerTokenExchangeTest extends AbstractInitializedBase
                                     .param(OAuth2Constants.GRANT_TYPE, OAuth2Constants.TOKEN_EXCHANGE_GRANT_TYPE)
                                     .param(OAuth2Constants.SUBJECT_TOKEN, tokenResponse.getIdToken())
                                     .param(OAuth2Constants.SUBJECT_TOKEN_TYPE, OAuth2Constants.ID_TOKEN_TYPE)
-                                    .param(OAuth2Constants.SUBJECT_ISSUER, bc.getIDPAlias())
+                                    .param(OAuth2Constants.SUBJECT_ISSUER, subjectIssuer)
                                     .param(OAuth2Constants.SCOPE, OAuth2Constants.SCOPE_OPENID)
 
                     ))) {
@@ -152,11 +176,11 @@ public final class KcOidcBrokerTokenExchangeTest extends AbstractInitializedBase
             identityProviderResource.update(idpRep);
         });
 
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doGrantAccessTokenRequest(bc.providerRealmName(), bc.getUserLogin(), bc.getUserPassword(), null, brokerApp.getClientId(), brokerApp.getSecret());
+        org.keycloak.testsuite.util.oauth.AccessTokenResponse tokenResponse = oauth.realm(bc.providerRealmName()).doGrantAccessTokenRequest(bc.getUserLogin(), bc.getUserPassword(), brokerApp.getClientId(), brokerApp.getSecret());
         assertThat(tokenResponse.getIdToken(), notNullValue());
         String idTokenString = tokenResponse.getIdToken();
         oauth.realm(bc.providerRealmName());
-        String logoutUrl = oauth.getLogoutUrl().idTokenHint(idTokenString)
+        String logoutUrl = oauth.getEndpoints().getLogoutBuilder().idTokenHint(idTokenString)
                 .postLogoutRedirectUri(oauth.APP_AUTH_ROOT).build();
         driver.navigate().to(logoutUrl);
         String logoutToken = testingClient.testApp().getBackChannelRawLogoutToken();
@@ -188,6 +212,30 @@ public final class KcOidcBrokerTokenExchangeTest extends AbstractInitializedBase
         }
     }
 
+    @Test
+    public void testInternalExternalTokenExchangeSessionToken() throws Exception {
+        testingClient.server(bc.consumerRealmName()).run(KcOidcBrokerTokenExchangeTest::setupRealm);
+
+        try (Closeable idpUpdater = new IdentityProviderAttributeUpdater(
+                        realmsResouce().realm(bc.consumerRealmName()).identityProviders().get(bc.getIDPAlias()))
+                .setStoreToken(false)
+                .update()) {
+            testInternalExternalTokenExchange();
+        }
+    }
+
+    @Test
+    public void testInternalExternalTokenExchangeStoredToken() throws Exception {
+        testingClient.server(bc.consumerRealmName()).run(KcOidcBrokerTokenExchangeTest::setupRealm);
+
+        try (Closeable idpUpdater = new IdentityProviderAttributeUpdater(
+                        realmsResouce().realm(bc.consumerRealmName()).identityProviders().get(bc.getIDPAlias()))
+                .setStoreToken(true)
+                .update()) {
+            testInternalExternalTokenExchange();
+        }
+    }
+
     private static void setupRealm(KeycloakSession session) {
         RealmModel realm = session.getContext().getRealm();
         IdentityProviderModel idp = session.identityProviders().getByAlias(IDP_OIDC_ALIAS);
@@ -201,12 +249,13 @@ public final class KcOidcBrokerTokenExchangeTest extends AbstractInitializedBase
         client.setSecret("secret");
         client.setProtocol(OIDCLoginProtocol.LOGIN_PROTOCOL);
         client.setFullScopeAllowed(false);
+        ClientModel brokerApp = realm.getClientByClientId("broker-app");
 
         AdminPermissionManagement management = AdminPermissions.management(session, realm);
         management.idps().setPermissionsEnabled(idp, true);
         ClientPolicyRepresentation clientRep = new ClientPolicyRepresentation();
         clientRep.setName("toIdp");
-        clientRep.addClient(client.getId());
+        clientRep.addClient(client.getId(), brokerApp.getId());
         ResourceServer server = management.realmResourceServer();
         Policy clientPolicy = management.authz().getStoreFactory().getPolicyStore().create(server, clientRep);
         management.idps().exchangeToPermission(idp).addAssociatedPolicy(clientPolicy);
@@ -215,5 +264,49 @@ public final class KcOidcBrokerTokenExchangeTest extends AbstractInitializedBase
         client = realm.getClientByClientId("brokerapp");
         client.addRedirectUri(OAuthClient.APP_ROOT + "/auth");
         client.setAttribute(OIDCConfigAttributes.BACKCHANNEL_LOGOUT_URL, OAuthClient.APP_ROOT + "/admin/backchannelLogout");
+    }
+
+    private void testInternalExternalTokenExchange() throws Exception {
+        final RealmResource consumerRealm = realmsResouce().realm(bc.consumerRealmName());
+        final int expires = realmsResouce().realm(bc.providerRealmName()).toRepresentation().getAccessTokenLifespan();
+        final ClientRepresentation brokerApp = ApiUtil.findClientByClientId(consumerRealm, "broker-app").toRepresentation();
+
+        logInAsUserInIDPForFirstTimeAndAssertSuccess();
+        final String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
+        org.keycloak.testsuite.util.oauth.AccessTokenResponse tokenResponse = oauth.doAccessTokenRequest(code, brokerApp.getSecret());
+        assertThat(tokenResponse.getError(), nullValue());
+        assertThat(tokenResponse.getAccessToken(), notNullValue());
+
+        exchangeToIdP(brokerApp, tokenResponse.getAccessToken(), expires);
+
+        setTimeOffset(expires - IdentityProviderModel.DEFAULT_MIN_VALIDITY_TOKEN);
+
+        tokenResponse = oauth.doRefreshTokenRequest(tokenResponse.getRefreshToken(), brokerApp.getSecret());
+        assertThat(tokenResponse.getError(), nullValue());
+        assertThat(tokenResponse.getAccessToken(), notNullValue());
+
+        exchangeToIdP(brokerApp, tokenResponse.getAccessToken(), expires);
+    }
+
+    private void exchangeToIdP(ClientRepresentation brokerApp, String subjectToken, long expires) {
+        try (Client httpClient = AdminClientUtil.createResteasyClient();
+             Response response = httpClient.target(OAuthClient.AUTH_SERVER_ROOT)
+                .path("/realms").path(bc.consumerRealmName()).path("protocol/openid-connect/token")
+                .request()
+                .header(HttpHeaders.AUTHORIZATION, BasicAuthHelper.createHeader(brokerApp.getClientId(), brokerApp.getSecret()))
+                .post(Entity.form(new Form()
+                        .param(OAuth2Constants.GRANT_TYPE, OAuth2Constants.TOKEN_EXCHANGE_GRANT_TYPE)
+                        .param(OAuth2Constants.SUBJECT_TOKEN, subjectToken)
+                        .param(OAuth2Constants.SUBJECT_TOKEN_TYPE, OAuth2Constants.ACCESS_TOKEN_TYPE)
+                        .param(OAuth2Constants.REQUESTED_ISSUER, bc.getIDPAlias()))
+                )) {
+            assertThat(response.getStatus(), is(Response.Status.OK.getStatusCode()));
+
+            AccessTokenResponse exchangeResponse = response.readEntity(AccessTokenResponse.class);
+            assertThat(exchangeResponse.getError(), nullValue());
+            assertThat(exchangeResponse.getToken(), notNullValue());
+            assertThat(exchangeResponse.getExpiresIn(), greaterThan((long) IdentityProviderModel.DEFAULT_MIN_VALIDITY_TOKEN));
+            assertThat(exchangeResponse.getExpiresIn(), lessThanOrEqualTo(expires));
+        }
     }
 }

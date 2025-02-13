@@ -32,9 +32,7 @@ public class ShortErrorMessageHandler implements IParameterExceptionHandler {
         String errorMessage = ex.getMessage();
         String additionalSuggestion = null;
 
-        if (ex instanceof UnmatchedArgumentException) {
-            UnmatchedArgumentException uae = (UnmatchedArgumentException) ex;
-
+        if (ex instanceof UnmatchedArgumentException uae) {
             String[] unmatched = getUnmatchedPartsByOptionSeparator(uae, "=");
 
             String cliKey = unmatched[0];
@@ -72,12 +70,10 @@ public class ShortErrorMessageHandler implements IParameterExceptionHandler {
                     }
                 }
             }
-        } else if (ex instanceof MissingParameterException) {
-            MissingParameterException mpe = (MissingParameterException)ex;
+        } else if (ex instanceof MissingParameterException mpe) {
             if (mpe.getMissing().size() == 1) {
                 ArgSpec spec = mpe.getMissing().get(0);
-                if (spec instanceof OptionSpec) {
-                    OptionSpec option = (OptionSpec)spec;
+                if (spec instanceof OptionSpec option) {
                     errorMessage = getExpectedMessage(option);
                 }
             }
@@ -108,15 +104,29 @@ public class ShortErrorMessageHandler implements IParameterExceptionHandler {
     private String[] getUnmatchedPartsByOptionSeparator(UnmatchedArgumentException uae, String separator) {
         return uae.getUnmatched().get(0).split(separator);
     }
-    
+
     private String getExpectedMessage(OptionSpec option) {
         return String.format("Option '%s' (%s) expects %s.%s", String.join(", ", option.names()), option.paramLabel(),
                 option.typeInfo().isMultiValue() ? "one or more comma separated values without whitespace": "a single value",
-                getExpectedValuesMessage(option.completionCandidates()));
+                getExpectedValuesMessage(option.completionCandidates(), isCaseInsensitive(option)));
     }
-    
-    public static String getExpectedValuesMessage(Iterable<String> specCandidates) {
-        return specCandidates.iterator().hasNext() ? " Expected values are: " + String.join(", ", specCandidates) : "";
+
+    private boolean isCaseInsensitive(OptionSpec option) {
+        if (option.longestName().startsWith("--")) {
+            var mapper = PropertyMappers.getMapper(option.longestName().substring(2));
+            if (mapper != null) {
+                return mapper.getOption().isCaseInsensitiveExpectedValues();
+            }
+        }
+        return false;
+    }
+
+    public static String getExpectedValuesMessage(Iterable<String> specCandidates, boolean caseInsensitive) {
+        if (specCandidates == null || !specCandidates.iterator().hasNext()) {
+            return "";
+        }
+        return String.format(" Expected values are%s: %s", caseInsensitive ? " (case insensitive)" : "",
+                String.join(", ", specCandidates));
     }
 
 }

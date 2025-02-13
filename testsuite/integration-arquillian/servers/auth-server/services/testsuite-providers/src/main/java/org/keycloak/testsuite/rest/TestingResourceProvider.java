@@ -80,6 +80,7 @@ import org.keycloak.representations.idm.EventRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.services.ErrorPage;
 import org.keycloak.services.ErrorResponse;
+import org.keycloak.services.managers.AuthenticationSessionManager;
 import org.keycloak.services.resource.RealmResourceProvider;
 import org.keycloak.services.scheduled.ClearExpiredUserSessions;
 import org.keycloak.sessions.RootAuthenticationSessionModel;
@@ -95,7 +96,6 @@ import org.keycloak.testsuite.forms.PassThroughClientAuthenticator;
 import org.keycloak.testsuite.model.infinispan.InfinispanTestUtil;
 import org.keycloak.testsuite.rest.representation.AuthenticatorState;
 import org.keycloak.testsuite.rest.resource.TestCacheResource;
-import org.keycloak.testsuite.rest.resource.TestJavascriptResource;
 import org.keycloak.testsuite.rest.resource.TestLDAPResource;
 import org.keycloak.testsuite.rest.resource.TestingExportImportResource;
 import org.keycloak.testsuite.runonserver.FetchOnServer;
@@ -864,12 +864,6 @@ public class TestingResourceProvider implements RealmResourceProvider {
         }
     }
 
-
-    @Path("/javascript")
-    public TestJavascriptResource getJavascriptResource() {
-        return new TestJavascriptResource(session);
-    }
-
     private void setFeatureInProfileFile(File file, Profile.Feature featureProfile, String newState) {
         doWithProperties(file, props -> {
             props.setProperty(PropertiesProfileConfigResolver.getPropertyKey(featureProfile), newState);
@@ -1155,7 +1149,8 @@ public class TestingResourceProvider implements RealmResourceProvider {
     @NoCache
     public Integer getAuthenticationSessionTabsCount(@QueryParam("realm") String realmName, @QueryParam("authSessionId") String authSessionId) {
         RealmModel realm = getRealmByName(realmName);
-        RootAuthenticationSessionModel rootAuthSession = session.authenticationSessions().getRootAuthenticationSession(realm, authSessionId);
+        String decodedAuthSessionId = new AuthenticationSessionManager(session).decodeBase64AndValidateSignature(authSessionId, false);
+        RootAuthenticationSessionModel rootAuthSession = session.authenticationSessions().getRootAuthenticationSession(realm, decodedAuthSessionId);
         if (rootAuthSession == null) {
             return 0;
         }

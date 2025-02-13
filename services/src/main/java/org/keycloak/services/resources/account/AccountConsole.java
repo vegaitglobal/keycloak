@@ -3,7 +3,10 @@ package org.keycloak.services.resources.account;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.ServerErrorException;
+import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response.Status;
 import jakarta.ws.rs.core.UriBuilder;
 import org.jboss.resteasy.reactive.NoCache;
 import org.keycloak.OAuth2Constants;
@@ -11,6 +14,10 @@ import org.keycloak.authentication.requiredactions.DeleteAccount;
 import org.keycloak.common.Profile;
 import org.keycloak.common.Version;
 import org.keycloak.common.util.Environment;
+import org.keycloak.models.FederatedIdentityModel;
+import org.keycloak.models.IdentityProviderModel;
+import org.keycloak.models.IdentityProviderStorageProvider;
+import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 import org.keycloak.protocol.oidc.utils.PkceUtils;
 import org.keycloak.utils.SecureContextResolver;
 import org.keycloak.models.AccountRoles;
@@ -28,7 +35,6 @@ import org.keycloak.services.managers.AppAuthManager;
 import org.keycloak.services.managers.Auth;
 import org.keycloak.services.managers.AuthenticationManager;
 import org.keycloak.services.resource.AccountResourceProvider;
-import org.keycloak.services.resources.AbstractSecuredLocalService;
 import org.keycloak.services.resources.RealmsResource;
 import org.keycloak.services.util.ResolveRelative;
 import org.keycloak.services.util.ViteManifest;
@@ -45,6 +51,7 @@ import org.keycloak.utils.StringUtil;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -55,6 +62,7 @@ import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Created by st on 29/03/17.
@@ -109,6 +117,10 @@ public class AccountConsole implements AccountResourceProvider {
             return redirectToLogin(path);
         }
 
+        return renderAccountConsole();
+    }
+
+    private Response renderAccountConsole() throws IOException, FreeMarkerException {
         final var serverUriInfo = session.getContext().getUri(UrlType.FRONTEND);
         final var serverBaseUri = serverUriInfo.getBaseUri();
         // Strip any trailing slashes from the URL.
@@ -137,6 +149,17 @@ public class AccountConsole implements AccountResourceProvider {
         map.put("resourceCommonUrl", Urls.themeRoot(serverBaseUri).getPath() + "/common/keycloak");
         map.put("resourceVersion", Version.RESOURCES_VERSION);
 
+        MultivaluedMap<String, String> queryParameters = session.getContext().getUri().getQueryParameters();
+        var requestedScopes = queryParameters.getFirst(OIDCLoginProtocol.SCOPE_PARAM);
+
+        if (requestedScopes == null) {
+            requestedScopes = AuthenticationManager.getRequestedScopes(session, realm.getClientByClientId(Constants.ACCOUNT_CONSOLE_CLIENT_ID));
+        }
+
+        if (requestedScopes != null) {
+            map.put(OIDCLoginProtocol.SCOPE_PARAM, requestedScopes);
+        }
+
         String[] referrer = getReferrer();
         if (referrer != null) {
             map.put("referrer", referrer[0]);
@@ -153,16 +176,19 @@ public class AccountConsole implements AccountResourceProvider {
         map.put("msgJSON", messagesToJsonString(messages));
         map.put("supportedLocales", supportedLocales(messages));
         map.put("properties", theme.getProperties());
+        map.put("darkMode", "true".equals(theme.getProperties().getProperty("darkMode"))
+                && realm.getAttribute("darkMode", true));
         map.put("theme", (Function<String, String>) file -> {
             try {
                 final InputStream resource = theme.getResourceAsStream(file);
-                return new Scanner(resource, "UTF-8").useDelimiter("\\A").next();
+                return new Scanner(resource, StandardCharsets.UTF_8).useDelimiter("\\A").next();
             } catch (IOException e) {
                 throw new RuntimeException("could not load file", e);
             }
         });
 
         map.put("isAuthorizationEnabled", Profile.isFeatureEnabled(Profile.Feature.AUTHORIZATION));
+        map.put("isLinkedAccountsEnabled", isLinkedAccountsEnabled(user));
 
         boolean deleteAccountAllowed = false;
         boolean isViewGroupsEnabled = false;
@@ -177,7 +203,7 @@ public class AccountConsole implements AccountResourceProvider {
 
         map.put("isViewGroupsEnabled", isViewGroupsEnabled);
         map.put("isViewOrganizationsEnabled", realm.isOrganizationsEnabled());
-        map.put("isOid4VciEnabled", Profile.isFeatureEnabled(Profile.Feature.OID4VC_VCI));
+        map.put("isOid4VciEnabled", realm.isVerifiableCredentialsEnabled());
 
         map.put("updateEmailFeatureEnabled", Profile.isFeatureEnabled(Profile.Feature.UPDATE_EMAIL));
         RequiredActionProviderModel updateEmailActionProvider = realm.getRequiredActionProviderByAlias(UserModel.RequiredAction.UPDATE_EMAIL.name());
@@ -246,6 +272,21 @@ public class AccountConsole implements AccountResourceProvider {
                 .queryParam(OAuth2Constants.RESPONSE_TYPE, OAuth2Constants.CODE)
                 .queryParam(OAuth2Constants.CODE_CHALLENGE, pkceChallenge)
                 .queryParam(OAuth2Constants.CODE_CHALLENGE_METHOD, OAuth2Constants.PKCE_METHOD_S256);
+
+        if (!queryParameters.isEmpty()) {
+            String error = queryParameters.getFirst(OAuth2Constants.ERROR);
+            if (error != null) {
+                try {
+                    return renderAccountConsole();
+                } catch (IOException | FreeMarkerException e) {
+                    throw new ServerErrorException(Status.INTERNAL_SERVER_ERROR);
+                }
+            }
+            String scope = queryParameters.getFirst(OIDCLoginProtocol.SCOPE_PARAM);
+            if (StringUtil.isNotBlank(scope)) {
+                uriBuilder.queryParam(OIDCLoginProtocol.SCOPE_PARAM, scope);
+            }
+        }
 
         URI url = uriBuilder.build();
 
@@ -334,4 +375,19 @@ public class AccountConsole implements AccountResourceProvider {
         return new String[]{referrer, referrerName, referrerUri};
     }
 
+    private boolean isLinkedAccountsEnabled(UserModel user) {
+        if (user == null) {
+            return false;
+        }
+
+        IdentityProviderStorageProvider identityProviders = session.identityProviders();
+        Stream<IdentityProviderModel> realmBrokers = identityProviders.getAllStream(Map.of(
+                IdentityProviderModel.ENABLED, "true",
+                IdentityProviderModel.ORGANIZATION_ID, ""), 0, 1);
+        Stream<IdentityProviderModel> linkedBrokers = session.users().getFederatedIdentitiesStream(realm, user)
+                .map(FederatedIdentityModel::getIdentityProvider)
+                .map(identityProviders::getByAlias);
+
+        return Stream.concat(realmBrokers, linkedBrokers).findAny().isPresent();
+    }
 }

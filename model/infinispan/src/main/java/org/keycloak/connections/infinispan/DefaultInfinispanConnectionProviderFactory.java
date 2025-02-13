@@ -20,6 +20,7 @@ package org.keycloak.connections.infinispan;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.ServiceLoader;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -46,6 +47,7 @@ import org.keycloak.cluster.ClusterEvent;
 import org.keycloak.cluster.ClusterProvider;
 import org.keycloak.cluster.ManagedCacheManagerProvider;
 import org.keycloak.connections.infinispan.remote.RemoteInfinispanConnectionProvider;
+import org.keycloak.connections.jpa.JpaConnectionProvider;
 import org.keycloak.infinispan.util.InfinispanUtils;
 import org.keycloak.marshalling.Marshalling;
 import org.keycloak.models.KeycloakSession;
@@ -56,6 +58,7 @@ import org.keycloak.models.cache.infinispan.events.RealmUpdatedEvent;
 import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.models.utils.PostMigrationEvent;
 import org.keycloak.provider.InvalidationHandler.ObjectType;
+import org.keycloak.provider.Provider;
 import org.keycloak.provider.ProviderEvent;
 
 import static org.keycloak.connections.infinispan.InfinispanConnectionProvider.ACTION_TOKEN_CACHE;
@@ -65,6 +68,7 @@ import static org.keycloak.connections.infinispan.InfinispanConnectionProvider.A
 import static org.keycloak.connections.infinispan.InfinispanConnectionProvider.AUTHORIZATION_REVISIONS_CACHE_NAME;
 import static org.keycloak.connections.infinispan.InfinispanConnectionProvider.CLIENT_SESSION_CACHE_NAME;
 import static org.keycloak.connections.infinispan.InfinispanConnectionProvider.CLUSTERED_CACHE_NAMES;
+import static org.keycloak.connections.infinispan.InfinispanConnectionProvider.CRL_CACHE_NAME;
 import static org.keycloak.connections.infinispan.InfinispanConnectionProvider.JGROUPS_BIND_ADDR;
 import static org.keycloak.connections.infinispan.InfinispanConnectionProvider.JGROUPS_UDP_MCAST_ADDR;
 import static org.keycloak.connections.infinispan.InfinispanConnectionProvider.JMX_DOMAIN;
@@ -112,7 +116,7 @@ public class DefaultInfinispanConnectionProviderFactory implements InfinispanCon
 
     @Override
     public InfinispanConnectionProvider create(KeycloakSession session) {
-        lazyInit();
+        lazyInit(session);
 
         return InfinispanUtils.isRemoteInfinispan() ?
                 new RemoteInfinispanConnectionProvider(cacheManager, remoteCacheManager, topologyInfo) :
@@ -160,14 +164,11 @@ public class DefaultInfinispanConnectionProviderFactory implements InfinispanCon
     public void close() {
         logger.debug("Closing provider");
         runWithWriteLockOnCacheManager(() -> {
-            if (cacheManager != null && !containerManaged) {
+            if (cacheManager != null) {
                 cacheManager.stop();
             }
             if (remoteCacheProvider != null) {
                 remoteCacheProvider.stop();
-            }
-            if (remoteCacheManager != null && !containerManaged) {
-                remoteCacheManager.stop();
             }
         });
     }
@@ -191,7 +192,7 @@ public class DefaultInfinispanConnectionProviderFactory implements InfinispanCon
         });
     }
 
-    protected void lazyInit() {
+    protected void lazyInit(KeycloakSession keycloakSession) {
         if (cacheManager == null) {
             synchronized (this) {
                 if (cacheManager == null) {
@@ -207,7 +208,7 @@ public class DefaultInfinispanConnectionProviderFactory implements InfinispanCon
                             throw new RuntimeException("Multiple " + org.keycloak.cluster.ManagedCacheManagerProvider.class + " providers found.");
                         }
 
-                        managedCacheManager = provider.getEmbeddedCacheManager(config);
+                        managedCacheManager = provider.getEmbeddedCacheManager(keycloakSession, config);
                         if (InfinispanUtils.isRemoteInfinispan()) {
                             rcm = provider.getRemoteCacheManager(config);
                         }
@@ -264,6 +265,7 @@ public class DefaultInfinispanConnectionProviderFactory implements InfinispanCon
         defineRevisionCache(cacheManager, AUTHORIZATION_CACHE_NAME, AUTHORIZATION_REVISIONS_CACHE_NAME, AUTHORIZATION_REVISIONS_CACHE_DEFAULT_MAX);
 
         cacheManager.getCache(KEYS_CACHE_NAME, true);
+        cacheManager.getCache(CRL_CACHE_NAME, true);
 
         this.topologyInfo = new TopologyInfo(cacheManager, config, false, getId());
 
@@ -317,6 +319,9 @@ public class DefaultInfinispanConnectionProviderFactory implements InfinispanCon
 
         cacheManager.defineConfiguration(KEYS_CACHE_NAME, getKeysCacheConfig());
         cacheManager.getCache(KEYS_CACHE_NAME, true);
+
+        cacheManager.defineConfiguration(CRL_CACHE_NAME, getCrlCacheConfig());
+        cacheManager.getCache(CRL_CACHE_NAME, true);
 
         var builder = createCacheConfigurationBuilder();
         if (clustered) {
@@ -473,6 +478,10 @@ public class DefaultInfinispanConnectionProviderFactory implements InfinispanCon
         return cb.build();
     }
 
+    protected Configuration getCrlCacheConfig() {
+        return InfinispanUtil.getCrlCacheConfig().build();
+    }
+
     private void registerSystemWideListeners(KeycloakSession session) {
         KeycloakSessionFactory sessionFactory = session.getKeycloakSessionFactory();
         ClusterProvider cluster = session.getProvider(ClusterProvider.class);
@@ -488,5 +497,10 @@ public class DefaultInfinispanConnectionProviderFactory implements InfinispanCon
                 sessionFactory.invalidate(null, ObjectType.REALM, rr.getId());
             }
         });
+    }
+
+    @Override
+    public Set<Class<? extends Provider>> dependsOn() {
+        return Set.of(JpaConnectionProvider.class);
     }
 }

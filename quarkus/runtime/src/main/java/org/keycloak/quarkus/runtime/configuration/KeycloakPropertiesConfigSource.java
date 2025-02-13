@@ -40,7 +40,6 @@ import io.smallrye.config.AbstractLocationConfigSourceLoader;
 import io.smallrye.config.PropertiesConfigSource;
 import io.smallrye.config.common.utils.ConfigSourceUtil;
 
-import static org.keycloak.common.util.StringPropertyReplacer.replaceProperties;
 import static org.keycloak.quarkus.runtime.configuration.Configuration.getMappedPropertyName;
 import static org.keycloak.quarkus.runtime.configuration.MicroProfileConfigProvider.NS_KEYCLOAK;
 import static org.keycloak.quarkus.runtime.configuration.MicroProfileConfigProvider.NS_KEYCLOAK_PREFIX;
@@ -50,6 +49,8 @@ import static org.keycloak.quarkus.runtime.configuration.MicroProfileConfigProvi
  * A configuration source for {@code keycloak.conf}.
  */
 public class KeycloakPropertiesConfigSource extends AbstractLocationConfigSourceLoader {
+    
+    public static final int PROPERTIES_FILE_ORDINAL = 475;
 
     private static final Pattern DOT_SPLIT = Pattern.compile("\\.");
     private static final String KEYCLOAK_CONFIG_FILE_ENV = "KC_CONFIG_FILE";
@@ -63,21 +64,7 @@ public class KeycloakPropertiesConfigSource extends AbstractLocationConfigSource
 
     @Override
     protected ConfigSource loadConfigSource(URL url, int ordinal) throws IOException {
-        // a workaround for https://github.com/smallrye/smallrye-config/issues/1207
-        // replace by the following line when fixed:
-        // return new PropertiesConfigSource(transform(ConfigSourceUtil.urlToMap(url)), url.toString(), ordinal);
-        var cs = new PropertiesConfigSource(transform(ConfigSourceUtil.urlToMap(url)), url.toString(), ordinal) {
-            private String name;
-            @Override
-            public String getName() {
-                return name;
-            }
-            public void setName(String name) {
-                this.name = name;
-            }
-        };
-        cs.setName(url.toString());
-        return cs;
+        return new PropertiesConfigSource(transform(ConfigSourceUtil.urlToMap(url)), url.toString(), ordinal);
     }
 
     public static class InClassPath extends KeycloakPropertiesConfigSource implements ConfigSourceProvider {
@@ -124,7 +111,7 @@ public class KeycloakPropertiesConfigSource extends AbstractLocationConfigSource
         }
 
         public List<ConfigSource> getConfigSources(final ClassLoader classLoader, Path configFile) {
-            return loadConfigSources(configFile.toUri().toString(), 450, classLoader);
+            return loadConfigSources(configFile.toUri().toString(), PROPERTIES_FILE_ORDINAL, classLoader);
         }
 
         @Override

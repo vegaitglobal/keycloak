@@ -71,7 +71,7 @@ import org.keycloak.testsuite.pages.AppPage;
 import org.keycloak.testsuite.util.AccountHelper;
 import org.keycloak.testsuite.util.LDAPRule;
 import org.keycloak.testsuite.util.LDAPTestUtils;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
 
 import javax.naming.AuthenticationException;
 import jakarta.ws.rs.core.Response;
@@ -382,7 +382,7 @@ public class LDAPProvidersIntegrationTest extends AbstractLDAPTest {
         loginPage.login(username, password);
         Assert.assertEquals(AppPage.RequestType.AUTH_RESPONSE, appPage.getRequestType());
 
-        OAuthClient.AccessTokenResponse tokenResponse = sendTokenRequestAndGetResponse(events.poll());
+        AccessTokenResponse tokenResponse = sendTokenRequestAndGetResponse(events.poll());
         oauth.idTokenHint(tokenResponse.getIdToken()).openLogout();
         events.poll();
     }
@@ -478,7 +478,7 @@ public class LDAPProvidersIntegrationTest extends AbstractLDAPTest {
 
     @Test
     public void loginLdapWithDirectGrant() throws Exception {
-        OAuthClient.AccessTokenResponse response = oauth.doGrantAccessTokenRequest("password", "johnkeycloak", "Password1");
+        AccessTokenResponse response = oauth.doGrantAccessTokenRequest("password", "johnkeycloak", "Password1");
         Assert.assertEquals(200, response.getStatusCode());
         AccessToken accessToken = oauth.verifyToken(response.getAccessToken());
 
@@ -540,7 +540,7 @@ public class LDAPProvidersIntegrationTest extends AbstractLDAPTest {
 
         events.expectRegister(username, email).assertEvent();
         EventRepresentation loginEvent = events.expectLogin().user(userId).assertEvent();
-        OAuthClient.AccessTokenResponse tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
+        AccessTokenResponse tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
         appPage.logout(tokenResponse.getIdToken());
         events.expectLogout(loginEvent.getSessionId()).user(userId).assertEvent();
 
@@ -591,8 +591,10 @@ public class LDAPProvidersIntegrationTest extends AbstractLDAPTest {
     private void assertPasswordConfiguredThroughLDAPOnly(UserResource user) {
         // Assert password not stored locally
         List<CredentialRepresentation> storedCredentials = user.credentials();
+        assertEquals(1, storedCredentials.size());
         for (CredentialRepresentation credential : storedCredentials) {
-            Assert.assertFalse(PasswordCredentialModel.TYPE.equals(credential.getType()));
+            Assert.assertTrue(PasswordCredentialModel.TYPE.equals(credential.getType()));
+            Assert.assertNotNull(credential.getFederationLink());
         }
 
         // Assert password is stored in the LDAP
@@ -1383,6 +1385,103 @@ public class LDAPProvidersIntegrationTest extends AbstractLDAPTest {
         });
 
         setTimeOffset(0);
+    }
+
+    @Test
+    public void testAlwaysReadValueFromLdapCached() throws Exception {
+        try {
+            // import user from the ldap johnkeycloak and cache it reading it by id
+            List<UserRepresentation> users = testRealm().users().search("johnkeycloak", true);
+            Assert.assertEquals(1, users.size());
+            UserRepresentation john = users.iterator().next();
+            Assert.assertEquals("Doe", john.getLastName());
+            john = testRealm().users().get(john.getId()).toRepresentation();
+            Assert.assertEquals("Doe", john.getLastName());
+
+            // modify the sn of the user directly in ldap
+            testingClient.server().run(session -> {
+                LDAPTestContext ctx = LDAPTestContext.init(session);
+                LDAPObject johnLdapObject = ctx.getLdapProvider().loadLDAPUserByUsername(ctx.getRealm(), "johnkeycloak");
+                johnLdapObject.setSingleAttribute(LDAPConstants.SN, "sn-modified");
+                ctx.getLdapProvider().getLdapIdentityStore().update(johnLdapObject);
+            });
+
+            // it's cached so it should be still the initial one
+            users = testRealm().users().search("johnkeycloak", true);
+            Assert.assertEquals(1, users.size());
+            john = users.iterator().next();
+            Assert.assertEquals("Doe", john.getLastName());
+            john = testRealm().users().get(john.getId()).toRepresentation();
+            Assert.assertEquals("Doe", john.getLastName());
+
+            // expire the cache which is 10 minutes
+            setTimeOffset(610);
+
+            // new sn should be present
+            users = testRealm().users().search("johnkeycloak", true);
+            Assert.assertEquals(1, users.size());
+            john = users.iterator().next();
+            Assert.assertEquals("sn-modified", john.getLastName());
+            john = testRealm().users().get(john.getId()).toRepresentation();
+            Assert.assertEquals("sn-modified", john.getLastName());
+        } finally {
+            // revert
+            testingClient.server().run(session -> {
+                LDAPTestContext ctx = LDAPTestContext.init(session);
+                LDAPObject johnLdapObject = ctx.getLdapProvider().loadLDAPUserByUsername(ctx.getRealm(), "johnkeycloak");
+                johnLdapObject.setSingleAttribute(LDAPConstants.SN, "Doe");
+                ctx.getLdapProvider().getLdapIdentityStore().update(johnLdapObject);
+            });
+        }
+    }
+
+    @Test
+    public void testAlwaysReadValueFromLdapNoCache() throws Exception {
+        // set to NO_CACHE
+        testingClient.server().run(session -> {
+            LDAPTestContext ctx = LDAPTestContext.init(session);
+            RealmModel appRealm = ctx.getRealm();
+            ctx.getLdapModel().setCachePolicy(UserStorageProviderModel.CachePolicy.NO_CACHE);
+            appRealm.updateComponent(ctx.getLdapModel());
+        });
+
+        try {
+            // import user from the ldap johnkeycloak
+            List<UserRepresentation> users = testRealm().users().search("johnkeycloak", true);
+            Assert.assertEquals(1, users.size());
+            UserRepresentation john = users.iterator().next();
+            Assert.assertEquals("Doe", john.getLastName());
+            john = testRealm().users().get(john.getId()).toRepresentation();
+            Assert.assertEquals("Doe", john.getLastName());
+
+            // modify the sn of the user directly in ldap
+            testingClient.server().run(session -> {
+                LDAPTestContext ctx = LDAPTestContext.init(session);
+                RealmModel appRealm = ctx.getRealm();
+                LDAPObject johnLdapObject = ctx.getLdapProvider().loadLDAPUserByUsername(appRealm, "johnkeycloak");
+                johnLdapObject.setSingleAttribute(LDAPConstants.SN, "sn-modified");
+                ctx.getLdapProvider().getLdapIdentityStore().update(johnLdapObject);
+            });
+
+            // no cache, so it should be validated and new data received
+            users = testRealm().users().search("johnkeycloak", true);
+            Assert.assertEquals(1, users.size());
+            john = users.iterator().next();
+            Assert.assertEquals("sn-modified", john.getLastName());
+            john = testRealm().users().get(john.getId()).toRepresentation();
+            Assert.assertEquals("sn-modified", john.getLastName());
+        } finally {
+            // revert cache to default max-liespan setting
+            testingClient.server().run(session -> {
+                LDAPTestContext ctx = LDAPTestContext.init(session);
+                LDAPObject johnLdapObject = ctx.getLdapProvider().loadLDAPUserByUsername(ctx.getRealm(), "johnkeycloak");
+                johnLdapObject.setSingleAttribute(LDAPConstants.SN, "Doe");
+                ctx.getLdapProvider().getLdapIdentityStore().update(johnLdapObject);
+                ctx.getLdapModel().setCachePolicy(UserStorageProviderModel.CachePolicy.MAX_LIFESPAN);
+                ctx.getLdapModel().setMaxLifespan(600000);
+                ctx.getRealm().updateComponent(ctx.getLdapModel());
+            });
+        }
     }
 
     @Test

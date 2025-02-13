@@ -23,6 +23,7 @@ import static org.keycloak.models.utils.StripSecretsUtils.stripSecrets;
 import org.jboss.logging.Logger;
 import org.keycloak.Config;
 import org.keycloak.authentication.otp.OTPApplicationProvider;
+import org.keycloak.authorization.AdminPermissionsSchema;
 import org.keycloak.authorization.AuthorizationProvider;
 import org.keycloak.authorization.AuthorizationProviderFactory;
 import org.keycloak.authorization.model.PermissionTicket;
@@ -84,6 +85,7 @@ public class ModelToRepresentation {
         REALM_EXCLUDED_ATTRIBUTES.add("bruteForceProtected");
         REALM_EXCLUDED_ATTRIBUTES.add("permanentLockout");
         REALM_EXCLUDED_ATTRIBUTES.add("maxTemporaryLockouts");
+        REALM_EXCLUDED_ATTRIBUTES.add("bruteForceStrategy");
         REALM_EXCLUDED_ATTRIBUTES.add("maxFailureWaitSeconds");
         REALM_EXCLUDED_ATTRIBUTES.add("waitIncrementSeconds");
         REALM_EXCLUDED_ATTRIBUTES.add("quickLoginCheckMilliSeconds");
@@ -121,6 +123,11 @@ public class ModelToRepresentation {
         REALM_EXCLUDED_ATTRIBUTES.add(Constants.CLIENT_PROFILES);
 
         REALM_EXCLUDED_ATTRIBUTES.add("firstBrokerLoginFlowId");
+
+        REALM_EXCLUDED_ATTRIBUTES.add("organizationsEnabled");
+        REALM_EXCLUDED_ATTRIBUTES.add("verifiableCredentialsEnabled");
+        REALM_EXCLUDED_ATTRIBUTES.add("adminPermissionsEnabled");
+        REALM_EXCLUDED_ATTRIBUTES.add("adminPermissionsClientId");
     }
 
     public static Set<String> CLIENT_EXCLUDED_ATTRIBUTES = new HashSet<>();
@@ -164,10 +171,6 @@ public class ModelToRepresentation {
         Map<String, List<String>> attributes = group.getAttributes();
         rep.setAttributes(attributes);
         return rep;
-    }
-
-    public static Stream<GroupModel> searchGroupModelsByAttributes(KeycloakSession session, RealmModel realm, Map<String,String> attributes, Integer first, Integer max) {
-        return session.groups().searchGroupsByAttributes(realm, attributes, first, max);
     }
 
     @Deprecated
@@ -281,6 +284,7 @@ public class ModelToRepresentation {
 
     public static EventRepresentation toRepresentation(Event event) {
         EventRepresentation rep = new EventRepresentation();
+        rep.setId(event.getId());
         rep.setTime(event.getTime());
         rep.setType(event.getType().toString());
         rep.setRealmId(event.getRealmId());
@@ -295,6 +299,7 @@ public class ModelToRepresentation {
 
     public static AdminEventRepresentation toRepresentation(AdminEvent adminEvent) {
         AdminEventRepresentation rep = new AdminEventRepresentation();
+        rep.setId(adminEvent.getId());
         rep.setTime(adminEvent.getTime());
         rep.setRealmId(adminEvent.getRealmId());
         if (adminEvent.getAuthDetails() != null) {
@@ -307,6 +312,7 @@ public class ModelToRepresentation {
         rep.setResourcePath(adminEvent.getResourcePath());
         rep.setRepresentation(adminEvent.getRepresentation());
         rep.setError(adminEvent.getError());
+        rep.setDetails(adminEvent.getDetails());
 
         return rep;
     }
@@ -372,6 +378,7 @@ public class ModelToRepresentation {
         rep.setBruteForceProtected(realm.isBruteForceProtected());
         rep.setPermanentLockout(realm.isPermanentLockout());
         rep.setMaxTemporaryLockouts(realm.getMaxTemporaryLockouts());
+        rep.setBruteForceStrategy(realm.getBruteForceStrategy());
         rep.setMaxFailureWaitSeconds(realm.getMaxFailureWaitSeconds());
         rep.setMinimumQuickLoginWaitSeconds(realm.getMinimumQuickLoginWaitSeconds());
         rep.setWaitIncrementSeconds(realm.getWaitIncrementSeconds());
@@ -402,6 +409,8 @@ public class ModelToRepresentation {
         rep.setResetPasswordAllowed(realm.isResetPasswordAllowed());
         rep.setEditUsernameAllowed(realm.isEditUsernameAllowed());
         rep.setOrganizationsEnabled(realm.isOrganizationsEnabled());
+        rep.setAdminPermissionsEnabled(realm.isAdminPermissionsEnabled());
+        rep.setVerifiableCredentialsEnabled(realm.isVerifiableCredentialsEnabled());
         rep.setDefaultSignatureAlgorithm(realm.getDefaultSignatureAlgorithm());
         rep.setRevokeRefreshToken(realm.isRevokeRefreshToken());
         rep.setRefreshTokenMaxReuse(realm.getRefreshTokenMaxReuse());
@@ -499,6 +508,14 @@ public class ModelToRepresentation {
         if (realm.getFirstBrokerLoginFlow() != null) rep.setFirstBrokerLoginFlow(realm.getFirstBrokerLoginFlow().getAlias());
 
         rep.setDefaultRole(toBriefRepresentation(realm.getDefaultRole()));
+
+        if (realm.getAdminPermissionsClient() != null) {
+            ClientModel adminPermissionsClient = realm.getAdminPermissionsClient();
+            ClientRepresentation clientRep = new ClientRepresentation();
+            clientRep.setId(adminPermissionsClient.getId());
+            clientRep.setClientId(adminPermissionsClient.getClientId());
+            rep.setAdminPermissionsClient(clientRep);
+        }
 
         List<String> defaultGroups = realm.getDefaultGroupsStream()
                 .map(ModelToRepresentation::buildGroupPath).collect(Collectors.toList());
@@ -650,6 +667,7 @@ public class ModelToRepresentation {
         rep.setCreatedDate(cred.getCreatedDate());
         rep.setSecretData(cred.getSecretData());
         rep.setCredentialData(cred.getCredentialData());
+        rep.setFederationLink(cred.getFederationLink());
         return rep;
     }
 
@@ -926,7 +944,9 @@ public class ModelToRepresentation {
         AuthenticationExecutionExportRepresentation rep = new AuthenticationExecutionExportRepresentation();
         if (model.getAuthenticatorConfig() != null) {
             AuthenticatorConfigModel config = new DeployedConfigurationsManager(session).getAuthenticatorConfig(realm, model.getAuthenticatorConfig());
-            rep.setAuthenticatorConfig(config.getAlias());
+            if (config != null) {
+                rep.setAuthenticatorConfig(config.getAlias());
+            }
         }
         rep.setAuthenticator(model.getAuthenticator());
         rep.setAuthenticatorFlow(model.isAuthenticatorFlow());
@@ -1034,6 +1054,7 @@ public class ModelToRepresentation {
         server.setAllowRemoteResourceManagement(model.isAllowRemoteResourceManagement());
         server.setPolicyEnforcementMode(model.getPolicyEnforcementMode());
         server.setDecisionStrategy(model.getDecisionStrategy());
+        server.setAuthorizationSchema(AdminPermissionsSchema.SCHEMA.getAuthorizationSchema(client));
 
         return server;
     }
@@ -1293,15 +1314,10 @@ public class ModelToRepresentation {
     }
 
     public static OrganizationRepresentation toRepresentation(OrganizationModel model) {
-        OrganizationRepresentation rep = toBriefRepresentation(model);
-        if (rep == null) {
-            return null;
-        }
-        rep.setAttributes(model.getAttributes());
-        return rep;
+        return toRepresentation(model, true);
     }
 
-    public static OrganizationRepresentation toBriefRepresentation(OrganizationModel model) {
+    public static OrganizationRepresentation toRepresentation(OrganizationModel model, boolean briefRepresentation) {
         if (model == null) {
             return null;
         }
@@ -1309,6 +1325,9 @@ public class ModelToRepresentation {
         rep.setId(model.getId());
         rep.setName(model.getName());
         rep.setAlias(model.getAlias());
+        if (!briefRepresentation) {
+            rep.setAttributes(model.getAttributes());
+        }
         rep.setEnabled(model.isEnabled());
         rep.setRedirectUrl(model.getRedirectUrl());
         rep.setDescription(model.getDescription());

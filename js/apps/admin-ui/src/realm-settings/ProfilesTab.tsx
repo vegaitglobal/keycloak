@@ -5,7 +5,7 @@ import {
   useAlerts,
   useFetch,
 } from "@keycloak/keycloak-ui-shared";
-import { CodeEditor, Language } from "@patternfly/react-code-editor";
+import CodeEditor from "@uiw/react-textarea-code-editor";
 import {
   ActionGroup,
   AlertVariant,
@@ -251,17 +251,13 @@ export default function ProfilesTab() {
       ) : (
         <FormGroup fieldId={"jsonEditor"}>
           <div className="pf-v5-u-mt-md pf-v5-u-ml-lg">
-            <CodeEditor
-              isLineNumbersVisible
-              isLanguageLabelVisible
-              isReadOnly={false}
-              code={code}
-              language={Language.json}
-              height="30rem"
-              onChange={(value) => {
-                setCode(value ?? "");
-              }}
-            />
+            <div style={{ height: "30rem", overflow: "scroll" }}>
+              <CodeEditor
+                value={code}
+                language="json"
+                onChange={(event) => setCode(event.target.value ?? "")}
+              />
+            </div>
           </div>
           <ActionGroup>
             <div className="pf-v5-u-mt-md">

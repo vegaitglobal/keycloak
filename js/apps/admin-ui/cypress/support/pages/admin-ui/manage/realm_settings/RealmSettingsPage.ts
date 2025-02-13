@@ -1,4 +1,3 @@
-import { v4 as uuid } from "uuid";
 import Select from "../../../../forms/Select";
 
 import CommonPage from "../../../CommonPage";
@@ -24,13 +23,13 @@ export default class RealmSettingsPage extends CommonPage {
   userProfileTab = "rs-user-profile-tab";
   tokensTab = "rs-tokens-tab";
   selectLoginTheme = "#kc-login-theme";
-  loginThemeList = "[data-testid='select-login-theme']";
+  loginThemeList = "[data-testid='select-loginTheme']";
   selectAccountTheme = "#kc-account-theme";
-  accountThemeList = "[data-testid='select-account-theme']";
+  accountThemeList = "[data-testid='select-accountTheme']";
   selectAdminTheme = "#kc-admin-ui-theme";
-  adminThemeList = "[data-testid='select-admin-theme']";
+  adminThemeList = "[data-testid='select-adminTheme']";
   selectEmailTheme = "#kc-email-theme";
-  emailThemeList = "[data-testid='select-email-theme']";
+  emailThemeList = "[data-testid='select-emailTheme']";
   ssoSessionIdleSelectMenu = "#kc-sso-session-idle-select-menu";
   ssoSessionIdleSelectMenuList = "#kc-sso-session-idle-select-menu ul";
   ssoSessionMaxSelectMenu = "#kc-sso-session-max-select-menu";
@@ -190,7 +189,7 @@ export default class RealmSettingsPage extends CommonPage {
   #jsonEditorSaveBtn = "jsonEditor-saveBtn";
   #jsonEditorSavePoliciesBtn = "jsonEditor-policies-saveBtn";
   #jsonEditorReloadBtn = "jsonEditor-reloadBtn";
-  #jsonEditor = ".monaco-scrollable-element.editor-scrollable.vs";
+  #jsonEditor = ".w-tc-editor-text";
   #clientPolicyDrpDwn = '[data-testid="action-dropdown"]';
   #deleteclientPolicyDrpDwn = "deleteClientPolicyDropdown";
   #clientProfileOne =
@@ -285,7 +284,7 @@ export default class RealmSettingsPage extends CommonPage {
   disableRealm() {
     cy.get(this.#modalDialogTitle).contains("Disable realm?");
     cy.get(this.#modalDialogBodyText).contains(
-      "User and clients can't access the realm if it's disabled. Are you sure you want to continue?",
+      "Users and clients cannot access the realm if it is disabled. Are you sure you want to continue?",
     );
     cy.findByTestId(this.modalConfirm).click();
   }
@@ -461,7 +460,7 @@ export default class RealmSettingsPage extends CommonPage {
   }
 
   toggleSwitch(switchName: string, waitFor: boolean | undefined = true) {
-    const loadName = `load-${uuid()}`;
+    const loadName = `load-${crypto.randomUUID()}`;
     if (waitFor) {
       cy.intercept({ path: "/admin/realms/*", times: 1 }).as(loadName);
     }
@@ -842,12 +841,15 @@ export default class RealmSettingsPage extends CommonPage {
 
   shouldSaveChangedJSONProfiles() {
     cy.findByTestId(this.#jsonEditorProfilesView).check();
-    cy.get(this.#jsonEditor).type(`{pageup}{del} [{
+    cy.get(this.#jsonEditor).type(
+      `{pageup}{del} [{
       "name": "Test",
       "description": "Test Description",
       "executors": [],
       "global": false
-    }, {downarrow}{end}{backspace}{backspace}`);
+    }, {downarrow}{end}{backspace}{backspace}`,
+      { force: true },
+    );
     cy.findByTestId(this.#jsonEditorSaveBtn).click();
     cy.get(this.#alertMessage).should(
       "be.visible",

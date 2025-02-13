@@ -67,13 +67,13 @@ jobs:
         uses: ./.github/actions/java-setup
 
       - name: Setup Minikube-Kubernetes
-        uses: manusa/actions-setup-minikube@v2.13.0
+        uses: manusa/actions-setup-minikube@v2.13.1
         with:
           minikube version: ${{ env.MINIKUBE_VERSION }}
           kubernetes version: ${{ env.KUBERNETES_VERSION }}
           github token: ${{ secrets.GITHUB_TOKEN }}
           driver: docker
-          start args: --addons=ingress --memory=${{ env.MINIKUBE_MEMORY }}
+          start args: --addons=ingress --memory=${{ env.MINIKUBE_MEMORY }} --cni cilium --cpus=max
 
       - name: Download keycloak distribution
         id: download-keycloak-dist
@@ -111,13 +111,13 @@ jobs:
         uses: ./.github/actions/java-setup
 
       - name: Setup Minikube-Kubernetes
-        uses: manusa/actions-setup-minikube@v2.13.0
+        uses: manusa/actions-setup-minikube@v2.13.1
         with:
           minikube version: ${{ env.MINIKUBE_VERSION }}
           kubernetes version: ${{ env.KUBERNETES_VERSION }}
           github token: ${{ secrets.GITHUB_TOKEN }}
           driver: docker
-          start args: --addons=ingress --memory=${{ env.MINIKUBE_MEMORY }}
+          start args: --addons=ingress --memory=${{ env.MINIKUBE_MEMORY }} --cni cilium --cpus=max
 
       - name: Download keycloak distribution
         id: download-keycloak-dist
@@ -141,6 +141,7 @@ jobs:
               -Dkc.operator.keycloak.image=keycloak:${{ env.version_remote }} \
               -Dquarkus.kubernetes.env.vars.kc-operator-keycloak-image-pull-policy=Never \
               -Dtest.operator.custom.image=custom-keycloak:${{ env.version_remote }} \
+              -Dquarkus.kubernetes.env.vars.kc-operator-keycloak-update-pod-deadline-seconds=60 \
               --no-transfer-progress -Dtest.operator.deployment=remote
 
   test-olm:
@@ -154,7 +155,7 @@ jobs:
         uses: ./.github/actions/java-setup
 
       - name: Setup Minikube-Kubernetes
-        uses: manusa/actions-setup-minikube@v2.13.0
+        uses: manusa/actions-setup-minikube@v2.13.1
         with:
           minikube version: ${{ env.MINIKUBE_VERSION }}
           kubernetes version: ${{ env.KUBERNETES_VERSION }}

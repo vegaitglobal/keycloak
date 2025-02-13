@@ -5,7 +5,7 @@ import {
   useAlerts,
   useFetch,
 } from "@keycloak/keycloak-ui-shared";
-import { CodeEditor, Language } from "@patternfly/react-code-editor";
+import CodeEditor from "@uiw/react-textarea-code-editor";
 import {
   AlertVariant,
   Button,
@@ -288,15 +288,13 @@ export const PoliciesTab = () => {
       ) : (
         <>
           <div className="pf-v5-u-mt-md pf-v5-u-ml-lg">
-            <CodeEditor
-              isLineNumbersVisible
-              isLanguageLabelVisible
-              isReadOnly={false}
-              code={code}
-              language={Language.json}
-              height="30rem"
-              onChange={setCode}
-            />
+            <div style={{ height: "30rem", overflow: "scroll" }}>
+              <CodeEditor
+                value={code}
+                language="json"
+                onChange={(event) => setCode(event.target.value)}
+              />
+            </div>
           </div>
           <div className="pf-v5-u-mt-md">
             <Button

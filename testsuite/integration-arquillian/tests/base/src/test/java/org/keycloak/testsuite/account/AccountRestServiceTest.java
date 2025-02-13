@@ -31,6 +31,7 @@ import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.authentication.authenticators.browser.WebAuthnAuthenticatorFactory;
 import org.keycloak.authentication.authenticators.browser.WebAuthnPasswordlessAuthenticatorFactory;
+import org.keycloak.authentication.requiredactions.DeleteCredentialAction;
 import org.keycloak.authentication.requiredactions.WebAuthnPasswordlessRegisterFactory;
 import org.keycloak.authentication.requiredactions.WebAuthnRegisterFactory;
 import org.keycloak.broker.provider.util.SimpleHttp;
@@ -75,7 +76,7 @@ import org.keycloak.testsuite.admin.authentication.AbstractAuthenticationTest;
 import org.keycloak.testsuite.arquillian.annotation.EnableFeature;
 import org.keycloak.testsuite.broker.util.SimpleHttpDefault;
 import org.keycloak.testsuite.forms.VerifyProfileTest;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
 import org.keycloak.testsuite.util.TokenUtil;
 import org.keycloak.testsuite.util.UserBuilder;
 import org.keycloak.userprofile.UserProfileContext;
@@ -96,6 +97,7 @@ import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.containsString;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -987,8 +989,31 @@ public class AccountRestServiceTest extends AbstractRestServiceTest {
             assertEquals(204, response.getStatus());
         }
 
-        // Revert - re-enable requiredAction and remove OTP credential from the user
+        // Revert - re-enable requiredAction
         setRequiredActionEnabledStatus(UserModel.RequiredAction.CONFIGURE_TOTP.name(), true);
+    }
+
+    // Issue 30204
+    @Test
+    public void testCredentialsGetWithDisabledDeleteCredentialAction() throws IOException {
+        // Assert OTP will be returned by default
+        List<AccountCredentialResource.CredentialContainer> credentials = getCredentials();
+        assertExpectedCredentialTypes(credentials, PasswordCredentialModel.TYPE, OTPCredentialModel.TYPE);
+
+        // Assert OTP removeable
+        AccountCredentialResource.CredentialContainer otpCredential = credentials.get(1);
+        assertTrue(otpCredential.isRemoveable());
+
+        // Disable "Delete credential" action
+        setRequiredActionEnabledStatus(DeleteCredentialAction.PROVIDER_ID, false);
+
+        // Assert OTP not removeable
+        credentials = getCredentials();
+        otpCredential = credentials.get(1);
+        assertFalse(otpCredential.isRemoveable());
+
+        // Revert - re-enable requiredAction
+        setRequiredActionEnabledStatus(DeleteCredentialAction.PROVIDER_ID, true);
     }
 
     private void setRequiredActionEnabledStatus(String requiredActionProviderId, boolean enabled) {
@@ -1116,7 +1141,7 @@ public class AccountRestServiceTest extends AbstractRestServiceTest {
     @Test
     public void listApplications() throws Exception {
         oauth.clientId("in-use-client");
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doGrantAccessTokenRequest("secret1", "view-applications-access", "password");
+        AccessTokenResponse tokenResponse = oauth.doGrantAccessTokenRequest("secret1", "view-applications-access", "password");
         assertNull(tokenResponse.getErrorDescription());
 
         TokenUtil token = new TokenUtil("view-applications-access", "password");
@@ -1139,7 +1164,7 @@ public class AccountRestServiceTest extends AbstractRestServiceTest {
     @Test
     public void listApplicationsFiltered() throws Exception {
         oauth.clientId("in-use-client");
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doGrantAccessTokenRequest("secret1", "view-applications-access", "password");
+        AccessTokenResponse tokenResponse = oauth.doGrantAccessTokenRequest("secret1", "view-applications-access", "password");
         assertNull(tokenResponse.getErrorDescription());
 
         TokenUtil token = new TokenUtil("view-applications-access", "password");
@@ -1162,7 +1187,7 @@ public class AccountRestServiceTest extends AbstractRestServiceTest {
     public void listApplicationsOfflineAccess() throws Exception {
         oauth.scope(OAuth2Constants.OFFLINE_ACCESS);
         oauth.clientId("offline-client");
-        OAuthClient.AccessTokenResponse offlineTokenResponse = oauth.doGrantAccessTokenRequest("secret1", "view-applications-access", "password");
+        AccessTokenResponse offlineTokenResponse = oauth.doGrantAccessTokenRequest("secret1", "view-applications-access", "password");
         assertNull(offlineTokenResponse.getErrorDescription());
 
         oauth.clientId("offline-client-without-base-url");
@@ -1248,7 +1273,7 @@ public class AccountRestServiceTest extends AbstractRestServiceTest {
     @Test
     public void listApplicationsWithRootUrl() throws Exception {
         oauth.clientId("root-url-client");
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doGrantAccessTokenRequest("password", "view-applications-access", "password");
+        AccessTokenResponse tokenResponse = oauth.doGrantAccessTokenRequest("password", "view-applications-access", "password");
         assertNull(tokenResponse.getErrorDescription());
 
         TokenUtil token = new TokenUtil("view-applications-access", "password");
@@ -1688,7 +1713,7 @@ public class AccountRestServiceTest extends AbstractRestServiceTest {
     public void revokeOfflineAccess() throws Exception {
         oauth.scope(OAuth2Constants.OFFLINE_ACCESS);
         oauth.clientId("offline-client");
-        OAuthClient.AccessTokenResponse offlineTokenResponse = oauth.doGrantAccessTokenRequest("secret1", "view-applications-access", "password");
+        AccessTokenResponse offlineTokenResponse = oauth.doGrantAccessTokenRequest("secret1", "view-applications-access", "password");
         assertNull(offlineTokenResponse.getErrorDescription());
 
         tokenUtil = new TokenUtil("view-applications-access", "password");
@@ -1735,7 +1760,7 @@ public class AccountRestServiceTest extends AbstractRestServiceTest {
     @Test
     public void testAudience() throws Exception {
         oauth.clientId("custom-audience");
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doGrantAccessTokenRequest("password", "test-user@localhost", "password");
+        AccessTokenResponse tokenResponse = oauth.doGrantAccessTokenRequest("password", "test-user@localhost", "password");
         assertNull(tokenResponse.getErrorDescription());
 
         SimpleHttp.Response response = SimpleHttpDefault.doGet(getAccountUrl(null), httpClient)
@@ -1796,6 +1821,19 @@ public class AccountRestServiceTest extends AbstractRestServiceTest {
             realmRep.setAccountTheme(accountTheme);
             testRealm().update(realmRep);
         }
+    }
+
+    @Test
+    public void testUpdateProfileUnrecognizedPropertyInRepresentation() throws IOException {
+        final UserRepresentation user = getUser();
+        final Map<String,String> invalidRep = Map.of("id", user.getId(), "username", user.getUsername(), "invalid", "something");
+        SimpleHttp.Response response = SimpleHttpDefault.doPost(getAccountUrl(null), httpClient)
+                .auth(tokenUtil.getToken())
+                .json(invalidRep)
+                .asResponse();
+       assertEquals(400, response.getStatus());
+       final OAuth2ErrorRepresentation error = response.asJson(OAuth2ErrorRepresentation.class);
+       assertThat(error.getError(), containsString("Invalid json representation for UserRepresentation. Unrecognized field \"invalid\" at line"));
     }
 
     @EnableFeature(Profile.Feature.UPDATE_EMAIL)

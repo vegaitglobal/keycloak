@@ -67,7 +67,7 @@ import org.keycloak.testsuite.util.AssertAdminEvents;
 import org.keycloak.testsuite.util.ClientScopeBuilder;
 import org.keycloak.testsuite.util.JsonTestUtils;
 import org.keycloak.testsuite.util.KeycloakModelUtils;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
 import org.keycloak.testsuite.util.RealmBuilder;
 import org.keycloak.testsuite.util.UserBuilder;
 import org.keycloak.userprofile.UserProfileContext;
@@ -191,11 +191,11 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
 
         //assert field names
         // i18n replaced
-        Assert.assertEquals("First name *",verifyProfilePage.getLabelForField("firstName"));
+        Assert.assertEquals("First name",verifyProfilePage.getLabelForField("firstName"));
         // attribute name used if no display name set
         Assert.assertEquals("lastName",verifyProfilePage.getLabelForField("lastName"));
         // direct value in display name
-        Assert.assertEquals("Department *",verifyProfilePage.getLabelForField("department"));
+        Assert.assertEquals("Department",verifyProfilePage.getLabelForField("department"));
     }
 
     @Test

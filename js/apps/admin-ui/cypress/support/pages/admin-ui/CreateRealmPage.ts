@@ -4,9 +4,9 @@ export default class CreateRealmPage {
   #modalClearBtn = "clear-button";
   #realmNameInput = "realm";
   #enabledSwitch = ".pf-v5-c-toolbar .pf-v5-c-switch__toggle";
-  #createBtn = '.pf-v5-c-form__group:last-child button[type="submit"]';
-  #cancelBtn = '.pf-v5-c-form__group:last-child button[type="button"]';
-  #codeEditor = ".pf-v5-c-code-editor__code";
+  #createBtn = '[data-testid="create"]';
+  #cancelBtn = '[data-testid="cancel"]';
+  #codeEditor = ".w-tc-editor-text";
 
   #getClearBtn() {
     return cy.findByText("Clear");
@@ -19,13 +19,19 @@ export default class CreateRealmPage {
   }
 
   fillCodeEditor() {
-    cy.get(this.#codeEditor).click().type("clear this field");
+    cy.get(this.#codeEditor).type("clear this field");
 
     return this;
   }
 
-  createRealm() {
-    cy.get(this.#createBtn).click();
+  createRealm(wait = true) {
+    if (wait) {
+      cy.intercept("POST", "/admin/realms").as("createRealm");
+      cy.get(this.#createBtn).click();
+      cy.wait("@createRealm");
+    } else {
+      cy.get(this.#createBtn).click();
+    }
 
     return this;
   }

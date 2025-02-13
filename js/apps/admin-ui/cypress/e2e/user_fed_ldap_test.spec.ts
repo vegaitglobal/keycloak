@@ -1,5 +1,3 @@
-import { v4 as uuid } from "uuid";
-
 import LoginPage from "../support/pages/LoginPage";
 import SidebarPage from "../support/pages/admin-ui/SidebarPage";
 import ProviderPage from "../support/pages/admin-ui/manage/providers/ProviderPage";
@@ -96,11 +94,10 @@ const userImportingDisabledFailMessage =
   "User federation provider could not be saved: Can not disable Importing users when LDAP provider mode is UNSYNCED";
 
 const ldapTestSuccessMsg = "Successfully connected to LDAP";
-const ldapTestFailMsg =
-  "Error when trying to connect to LDAP: 'CommunicationError'";
+const ldapTestFailMsg = "Error when trying to connect to LDAP: 'UnknownHost'";
 
 describe("User Federation LDAP tests", () => {
-  const realmName = `ldap-realm-${uuid()}`;
+  const realmName = `ldap-realm-${crypto.randomUUID()}`;
 
   before(() => adminClient.createRealm(realmName));
 

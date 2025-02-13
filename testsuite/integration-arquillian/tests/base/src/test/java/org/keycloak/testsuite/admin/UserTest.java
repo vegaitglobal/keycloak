@@ -27,6 +27,7 @@ import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.keycloak.TokenVerifier;
+import org.keycloak.admin.client.CreatedResponseUtil;
 import org.keycloak.admin.client.Keycloak;
 import org.keycloak.admin.client.resource.GroupResource;
 import org.keycloak.admin.client.resource.IdentityProviderResource;
@@ -40,12 +41,10 @@ import org.keycloak.common.util.Base64;
 import org.keycloak.common.util.MultivaluedHashMap;
 import org.keycloak.common.util.ObjectUtil;
 import org.keycloak.credential.CredentialModel;
-import org.keycloak.credential.hash.Pbkdf2Sha512PasswordHashProviderFactory;
 import org.keycloak.events.admin.OperationType;
 import org.keycloak.events.admin.ResourceType;
 import org.keycloak.models.Constants;
 import org.keycloak.models.LDAPConstants;
-import org.keycloak.models.PasswordPolicy;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.credential.OTPCredentialModel;
 import org.keycloak.models.credential.PasswordCredentialModel;
@@ -93,7 +92,7 @@ import org.keycloak.testsuite.util.DefaultPasswordHash;
 import org.keycloak.testsuite.util.GreenMailRule;
 import org.keycloak.testsuite.util.GroupBuilder;
 import org.keycloak.testsuite.util.MailUtils;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
 import org.keycloak.testsuite.util.RealmBuilder;
 import org.keycloak.testsuite.util.RoleBuilder;
 import org.keycloak.testsuite.util.UserBuilder;
@@ -131,6 +130,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.hasSize;
@@ -324,8 +324,13 @@ public class UserTest extends AbstractAdminTest {
             assertEquals(409, response.getStatus());
             assertAdminEvents.assertEmpty();
 
-            ErrorRepresentation error = response.readEntity(ErrorRepresentation.class);
-            Assert.assertEquals("User exists with same email", error.getErrorMessage());
+            // Alternative way of showing underlying error message
+            try {
+                CreatedResponseUtil.getCreatedId(response);
+                Assert.fail("Not expected getCreatedId to success");
+            } catch (WebApplicationException wae) {
+                Assert.assertThat(wae.getMessage(), endsWith("ErrorMessage: User exists with same email"));
+            }
         }
     }
 
@@ -921,8 +926,12 @@ public class UserTest extends AbstractAdminTest {
         List<UserRepresentation> users = realm.users().searchByAttributes(mapToSearchQuery(Map.of("username", "user", "test", "test1", "attr", "common", "test1", "test1")));
         assertThat(users, hasSize(1));
 
-        //custom user attribute should use wildcard search by default
+        //custom user attribute should not use wildcard search by default
         users = realm.users().searchByAttributes(mapToSearchQuery(Map.of("username", "user", "test", "est", "attr", "mm", "test1", "test1")));
+        assertThat(users, hasSize(0));
+
+        //custom user attribute should use wildcard
+        users = realm.users().searchByAttributes(mapToSearchQuery(Map.of("username", "user", "test", "est", "attr", "mm", "test1", "test1")), false);
         assertThat(users, hasSize(1));
 
         //with exact=true the user shouldn't be returned
@@ -2047,6 +2056,7 @@ public class UserTest extends AbstractAdminTest {
         try {
             final AccessToken accessToken = TokenVerifier.create(token, AccessToken.class).getToken();
             assertThat(accessToken.getExp() - accessToken.getIat(), allOf(greaterThanOrEqualTo(lifespan - 1l), lessThanOrEqualTo(lifespan + 1l)));
+            assertEquals(accessToken.getIssuedFor(), Constants.ACCOUNT_MANAGEMENT_CLIENT_ID);
         } catch (VerificationException e) {
             throw new IOException(e);
         }

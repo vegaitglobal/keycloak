@@ -68,13 +68,15 @@ export default class RoleMappingTab {
     cy.findByTestId(this.#filterTypeDropdown).click();
     cy.findByTestId(option).click();
 
+    cy.get('[role="progressbar"]').should("not.exist");
+
     return this;
   }
 
   selectRow(name: string, modal = false) {
     cy.get(modal ? ".pf-v5-c-modal-box " : "" + this.#namesColumn)
       .contains(name)
-      .parent()
+      .parents("tr")
       .within(() => {
         cy.get("input").click();
       });
